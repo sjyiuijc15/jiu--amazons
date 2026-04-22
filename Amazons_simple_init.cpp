@@ -48,11 +48,20 @@ bool ProcStep(int x0, int y0, int x1, int y1, int x2, int y2, int color, bool ch
 }
 
 
-//棋子坐标结构体
+// 棋子坐标结构体
 struct Point{
 	int x; // 横坐标
 	int y; // 纵坐标
 	Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
+};
+
+
+// 一步走法(原位置->移动->射箭)
+struct Move{
+	Point initgrid;
+	Point newgrid;
+	Point arows;
+	Move(Point init, Point newgrid, Point arows) : initgrid(init), newgrid(newgrid), arows(arows) {}
 };
 
 
@@ -68,43 +77,84 @@ bool LegalStep(int x, int y, int grid_info[GRIDSIZE][GRIDSIZE]){
 
 
 // part2.2: 一个亚马逊能移动到哪些位置
-vector<Point> get_move_pos(Point cu_point){
-	vector<Point> vecpo;
-	int x0 = cu_point.x, px = x0;
-	int y0 = cu_point.y, py = y0;
-	//8个方向
-	while(LegalStep(++px, ++py, gridInfo)){
-		//右上
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(++px, py, gridInfo)){
-		//右
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(++px, --py, gridInfo)){
-		//右下
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(px, --py, gridInfo)){
-		//下
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(--px, --py, gridInfo)){
-		//左下
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(--px, py, gridInfo)){
-		//左
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(--px, ++py, gridInfo)){
-		//左上
-		vecpo.push_back(Point(px, py));
-	}while(LegalStep(px, ++py, gridInfo)){
-		//上
-		vecpo.push_back(Point(px, py));
-	}
-	return vecpo;
+vector<Point> get_move_pos(Point cu_point) {
+    vector<Point> vecpo;
+    // 8个方向
+    for (int d = 0; d < 8; d++) {
+        int px = cu_point.x;
+        int py = cu_point.y;
+        while (true) {
+            px += dx[d];
+            py += dy[d];
+            if (LegalStep(px, py, gridInfo)) {
+                vecpo.emplace_back(px, py);
+            } else {
+                break;
+            }
+        }
+    }
+    return vecpo;
 }
 
 
 // part2.3: 移动后能射哪里
-vector<Point> get_arrow_pos(int** newgripInfo, Point newpoint){
+vector<Point> get_arrow_pos(int temp_grid[GRIDSIZE][GRIDSIZE], Point newpoint){
+	vector<Point> vecpo;
+    // 8个方向
+    for (int d = 0; d < 8; d++) {
+        int px = newpoint.x;
+        int py = newpoint.y;
+        while (true) {
+            px += dx[d];
+            py += dy[d];
+            if (LegalStep(px, py, temp_grid)) {
+                vecpo.emplace_back(px, py);
+            } else {
+                break;
+            }
+        }
+    }
+    return vecpo;
+}
 
+
+// part2.4: 生成完整走法
+vector<Move> get_valid_moves(int color = currBotColor){
+	vector<Move> all_valid_moves;// 全部走法
+	vector<Point> starts; //四个初始棋子位置
+
+	//获取四个亚马逊的位置
+	for(int x = 0; x < GRIDSIZE; x++){
+		for(int y = 0; y < GRIDSIZE; y++){
+			if(gridInfo[x][y] == color){
+				starts.emplace_back(x, y);
+			}
+		}
+	}
+
+	for(auto& p : starts){
+		vector<Point> move_positions = get_move_pos(p);
+
+		for(auto& new_p : move_positions){
+			// 临时棋盘，模拟移动到新位置
+			int temp_grid[GRIDSIZE][GRIDSIZE];
+			memcpy(temp_grid, gridInfo, sizeof(gridInfo));
+			temp_grid[p.x][p.y] = 0;
+			temp_grid[new_p.x][new_p.y] = color;
+
+			// 获取射箭位置
+			vector<Point> arrows_position = get_arrow_pos(temp_grid, new_p);
+
+			for(auto& arrow : arrows_position){
+				// 不能射自己脚下
+				if(arrow.x == new_p.x && arrow.y == new_p.y) continue;
+
+				all_valid_moves.emplace_back(p, new_p, arrow);
+			}
+		}
+	}
+
+	return all_valid_moves;
 }
 
 
@@ -154,67 +204,10 @@ int main()
 	/***在下面填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中*****/
 	//下面仅为随机策略的示例代码，且效率低，可删除
 	
-	int beginPos[3000][2], possiblePos[3000][2], obstaclePos[3000][2];
-	int posCount = 0, choice;
-	for (int i = 0; i < GRIDSIZE; ++i) {
-		for (int j = 0; j < GRIDSIZE; ++j) {
-			for (int k = 0; k < 8; ++k) {
-				for (int delta1 = 1; delta1 < GRIDSIZE; delta1++) {
-					int xx = i + dx[k] * delta1;
-					int yy = j + dy[k] * delta1;
-					if (gridInfo[xx][yy] != 0 || !inMap(xx, yy))
-						break;
-					for (int l = 0; l < 8; ++l) {
-						for (int delta2 = 1; delta2 < GRIDSIZE; delta2++) {
-							int xxx = xx + dx[l] * delta2;
-							int yyy = yy + dy[l] * delta2;
-							if (!inMap(xxx, yyy))
-								break;
-							if (gridInfo[xxx][yyy] != 0 && !(i == xxx && j == yyy))
-								break;
-							if (ProcStep(i, j, xx, yy, xxx, yyy, currBotColor, true))
-							{
-								beginPos[posCount][0] = i;
-								beginPos[posCount][1] = j;
-								possiblePos[posCount][0] = xx;
-								possiblePos[posCount][1] = yy;
-								obstaclePos[posCount][0] = xxx;
-								obstaclePos[posCount++][1] = yyy;
-							}
-						}
-
-					}
-				}
-
-			}
-		}
-	}
-
-	int startX, startY, resultX, resultY, obstacleX, obstacleY;
-	if (posCount > 0)
-	{
-		srand(time(0));
-		choice = rand() % posCount;
-		startX = beginPos[choice][0];
-		startY = beginPos[choice][1];
-		resultX = possiblePos[choice][0];
-		resultY = possiblePos[choice][1];
-		obstacleX = obstaclePos[choice][0];
-		obstacleY = obstaclePos[choice][1];
-	}
-	else
-	{
-		startX = -1;
-		startY = -1;
-		resultX = -1;
-		resultY = -1;
-		obstacleX = -1;
-		obstacleY = -1;
-	}
-
+	
 	/****在上方填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中****/
 	/*********************************************************************************************************/
 	
-	cout << startX << ' ' << startY << ' ' << resultX << ' ' << resultY << ' ' << obstacleX << ' ' << obstacleY << endl;
+	// cout << startX << ' ' << startY << ' ' << resultX << ' ' << resultY << ' ' << obstacleX << ' ' << obstacleY << endl;
 	return 0;
 }

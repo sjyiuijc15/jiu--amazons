@@ -3,6 +3,7 @@
 #include <string>
 #include <cstdlib>
 #include <ctime>
+#include <vector>
 
 
 #define GRIDSIZE 8
@@ -45,6 +46,67 @@ bool ProcStep(int x0, int y0, int x1, int y1, int x2, int y2, int color, bool ch
 	}
 	return true;
 }
+
+
+//棋子坐标结构体
+struct Point{
+	int x; // 横坐标
+	int y; // 纵坐标
+	Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
+};
+
+
+// part2.1: 判断格子能不能走
+bool LegalStep(int x, int y, int grid_info[GRIDSIZE][GRIDSIZE]){
+	if(!inMap(x, y)) return false;
+	else if(grid_info[x][y] == OBSTACLE || grid_info[x][y] == grid_black || grid_info[x][y] == grid_white){
+		// 不是边界, 不是亚马逊, 不是箭
+		return false;
+	}
+	return true;
+}
+
+
+// part2.2: 一个亚马逊能移动到哪些位置
+vector<Point> get_move_pos(Point cu_point){
+	vector<Point> vecpo;
+	int x0 = cu_point.x, px = x0;
+	int y0 = cu_point.y, py = y0;
+	//8个方向
+	while(LegalStep(++px, ++py, gridInfo)){
+		//右上
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(++px, py, gridInfo)){
+		//右
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(++px, --py, gridInfo)){
+		//右下
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(px, --py, gridInfo)){
+		//下
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(--px, --py, gridInfo)){
+		//左下
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(--px, py, gridInfo)){
+		//左
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(--px, ++py, gridInfo)){
+		//左上
+		vecpo.push_back(Point(px, py));
+	}while(LegalStep(px, ++py, gridInfo)){
+		//上
+		vecpo.push_back(Point(px, py));
+	}
+	return vecpo;
+}
+
+
+// part2.3: 移动后能射哪里
+vector<Point> get_arrow_pos(int** newgripInfo, Point newpoint){
+
+}
+
 
 int main()
 {

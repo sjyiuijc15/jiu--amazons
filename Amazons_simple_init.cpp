@@ -186,16 +186,19 @@ void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
     while (!q.empty()) {
         pair<int, int> curr = q.front();
         q.pop();
-
+        int nextDist = distMap[curr.first][curr.second] + 1;
         for (int d = 0; d < 8; d++) {
             int nx = curr.first + dx[d];
             int ny = curr.second + dy[d];
 
             if (mode == 1) { // Queen 走法: 一次移动可跨越多个空格
                 while (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
-                    if (distMap[nx][ny] > distMap[curr.first][curr.second] + 1) {
-                        distMap[nx][ny] = distMap[curr.first][curr.second] + 1;
+                    if (distMap[nx][ny] > nextDist) {
+                        distMap[nx][ny] = nextDist;
                         q.push({nx, ny});
+                    }
+                    else if(distMap[nx][ny] < nextDist){
+                        break;
                     }
                     nx += dx[d];
                     ny += dy[d];

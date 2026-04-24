@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <ctime>
 #include <vector>
-
+#include<queue>
+#include<algorithm>
+#include<cmath>
 
 #define GRIDSIZE 8
 #define OBSTACLE 2
@@ -14,11 +16,17 @@
 #define grid_white -1
 
 using namespace std;
-
 int currBotColor; // 本方所执子颜色（1为黑，-1为白，棋盘状态亦同）
 int gridInfo[GRIDSIZE][GRIDSIZE] = { 0 }; // 先x后y，记录棋盘状态
 int dx[] = { -1,-1,-1,0,0,1,1,1 };
 int dy[] = { -1,0,1,-1,1,-1,0,1 };
+
+// 评估因子结构体
+struct EvaluationResult {
+    double t1, t2, p1, p2, m;
+};
+
+
 
 // 判断是否在棋盘内
 inline bool inMap(int x, int y)
@@ -156,7 +164,157 @@ vector<Move> get_valid_moves(int color = currBotColor){
 
 	return all_valid_moves;
 }
+//----------------------------------评估函数开始--------------------------
 
+// 使用广度优先搜索 (BFS) 计算所有空格到棋子的最短距离
+// mode: 1 为 Queen 走法, 2 为 King 走法
+void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
+    for (int i = 0; i < GRIDSIZE; ++i)
+        for (int j = 0; j < GRIDSIZE; ++j)
+            distMap[i][j] = 100; // 初始化为无穷大
+
+    queue<pair<int, int>> q;
+    for (int i = 0; i < GRIDSIZE; ++i) {
+        for (int j = 0; j < GRIDSIZE; ++j) {
+            if (gridInfo[i][j] == color) {
+                distMap[i][j] = 0;
+                q.push({i, j});
+            }
+        }
+    }
+
+    while (!q.empty()) {
+        pair<int, int> curr = q.front();
+        q.pop();
+
+        for (int d = 0; d < 8; d++) {
+            int nx = curr.first + dx[d];
+            int ny = curr.second + dy[d];
+
+            if (mode == 1) { // Queen 走法: 一次移动可跨越多个空格
+                while (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
+                    if (distMap[nx][ny] > distMap[curr.first][curr.second] + 1) {
+                        distMap[nx][ny] = distMap[curr.first][curr.second] + 1;
+                        q.push({nx, ny});
+                    }
+                    nx += dx[d];
+                    ny += dy[d];
+                }
+            } else { // King 走法: 一次只能走一步
+                if (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
+                    if (distMap[nx][ny] > distMap[curr.first][curr.second] + 1) {
+                        distMap[nx][ny] = distMap[curr.first][curr.second] + 1;
+                        q.push({nx, ny});
+                    }
+                }
+            }
+        }
+    }
+}
+//计算黑白棋子的灵活度， (Mobility) 这里使用简化法：统计可行着法数，并惩罚最小灵活度棋子
+double getMobilityScore(int color) {
+    int totalMoves = 0;
+    int minMoves = 9999; // 初始设为一个较大值，用于记录四个棋子中的最小值
+    
+    // 1. 找到当前颜色（我方或对方）的所有棋子位置
+    vector<Point> queens;
+    for (int x = 0; x < GRIDSIZE; x++) {
+        for (int y = 0; y < GRIDSIZE; y++) {
+            if (gridInfo[x][y] == color) {
+                queens.emplace_back(x, y);
+            }
+        }
+    }
+
+    // 2. 遍历每一个皇后，计算其可行着法
+    for (auto& q : queens) {
+        int currentQueenMoves = 0;
+        
+        // 获取该棋子一步之内能到达的所有位置（Queen走法）
+        vector<Point> move_positions = get_move_pos(q);
+        
+        for (auto& new_p : move_positions) {
+            // 模拟移动：为了准确计算射箭位置，需要临时改变棋盘状态
+            int original_val = gridInfo[q.x][q.y];
+            gridInfo[q.x][q.y] = 0;
+            int target_original_val = gridInfo[new_p.x][new_p.y];
+            gridInfo[new_p.x][new_p.y] = color;
+
+            // 获取在该移动位置下能射箭的所有位置
+            // 注意：此处 get_arrow_pos 内部应使用当前的 gridInfo
+            vector<Point> arrows = get_arrow_pos(gridInfo, new_p);
+            currentQueenMoves += (int)arrows.size();
+
+            // 还原棋盘状态
+            gridInfo[new_p.x][new_p.y] = target_original_val;
+            gridInfo[q.x][q.y] = original_val;
+        }
+
+        // 累计总着法数
+        totalMoves += currentQueenMoves;
+        // 记录四个棋子中“最不灵活”的那个棋子的着法数 
+        if (currentQueenMoves < minMoves) {
+            minMoves = currentQueenMoves;
+        }
+    }
+
+    // 如果该色棋子已经全部无法移动，minMoves 应设为 0
+    if (queens.empty() || minMoves == 9999) minMoves = 0;
+
+    // 根据论文公式：总灵活度 = 所有棋子着法总和 + 最小灵活度值 
+    return (double)totalMoves + (double)minMoves;
+}
+// 评估函数核心实现
+double evaluate(int turnID) {
+    int whiteDistQ[GRIDSIZE][GRIDSIZE], blackDistQ[GRIDSIZE][GRIDSIZE];
+    int whiteDistK[GRIDSIZE][GRIDSIZE], blackDistK[GRIDSIZE][GRIDSIZE];
+
+    // 1. 计算距离矩阵 [cite: 342, 470]
+    computeDistances(grid_white, whiteDistQ, 1);
+    computeDistances(grid_black, blackDistQ, 1);
+    computeDistances(grid_white, whiteDistK, 2);
+    computeDistances(grid_black, blackDistK, 2);
+
+    double t1 = 0, t2 = 0, p1 = 0, p2 = 0;
+
+    for (int i = 0; i < GRIDSIZE; i++) {
+        for (int j = 0; j < GRIDSIZE; j++) {
+            if (gridInfo[i][j] != 0) continue;
+
+            // Territory 计算 (t1: Queen, t2: King) [cite: 409]
+            if (whiteDistQ[i][j] < blackDistQ[i][j]) t1 += 1.0;
+            else if (whiteDistQ[i][j] > blackDistQ[i][j]) t1 -= 1.0;
+
+            if (whiteDistK[i][j] < blackDistK[i][j]) t2 += 1.0;
+            else if (whiteDistK[i][j] > blackDistK[i][j]) t2 -= 1.0;
+
+            // Position 计算 (p1: Queen, p2: King) [cite: 413, 414]
+            p1 += (pow(2, -whiteDistQ[i][j]) - pow(2, -blackDistQ[i][j]));
+            double diffK = (double)(blackDistK[i][j] - whiteDistK[i][j]) / 6.0;
+            p2 += max(-1.0, min(1.0, diffK));
+        }
+    }
+
+    // 2. Mobility 计算 [cite: 452, 457, 458]
+    double m = getMobilityScore(grid_white) - getMobilityScore(grid_black);
+
+    // 3. 确定阶段权重 
+    double a, b, c, d, e; 
+    if (turnID <= 20) { // 开局
+        a = 0.14; b = 0.37; c = 0.13; d = 0.13; e = 0.20;
+    } else if (turnID <= 49) { // 中局
+        a = 0.25; b = 0.30; c = 0.20; d = 0.20; e = 0.05;
+    } else { // 残局
+        a = 0.80; b = 0.10; c = 0.05; d = 0.05; e = 0.00;
+    }
+
+    // 4. 最终计算 [cite: 338]
+    double score = a * t1 + b * t2 + c * p1 + d * p2 + e * m;
+    
+    // 如果当前机器人是黑方，则反转分数
+    return (currBotColor == grid_white) ? score : -score;
+}
+//----------------------------------评估函数结束--------------------------
 
 int main()
 {

@@ -7,7 +7,8 @@
 #include<queue>
 #include<algorithm>
 #include<cmath>
-
+#include <map>
+#include<cstring>
 #define GRIDSIZE 8
 #define OBSTACLE 2
 #define judge_black 0
@@ -58,9 +59,10 @@ bool ProcStep(int x0, int y0, int x1, int y1, int x2, int y2, int color, bool ch
 
 // 棋子坐标结构体
 struct Point{
-	int x; // 横坐标
-	int y; // 纵坐标
-	Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
+    int x; // 横坐标
+    int y; // 纵坐标
+    Point() : x(0), y(0) {} // 默认构造函数
+    Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
 };
 
 
@@ -70,6 +72,7 @@ struct Move{
 	Point newgrid;
 	Point arows;
 	Move(Point init, Point newgrid, Point arows) : initgrid(init), newgrid(newgrid), arows(arows) {}
+    Move() {}
 };
 
 
@@ -127,14 +130,14 @@ vector<Point> get_arrow_pos(int temp_grid[GRIDSIZE][GRIDSIZE], Point newpoint){
 
 
 // part2.4: 生成完整走法
-vector<Move> get_valid_moves(int color = currBotColor){
+vector<Move> get_valid_moves(int color, int tpgrid[GRIDSIZE][GRIDSIZE]){
 	vector<Move> all_valid_moves;// 全部走法
 	vector<Point> starts; //四个初始棋子位置
 
 	//获取四个亚马逊的位置
 	for(int x = 0; x < GRIDSIZE; x++){
 		for(int y = 0; y < GRIDSIZE; y++){
-			if(gridInfo[x][y] == color){
+			if(tpgrid[x][y] == color){
 				starts.emplace_back(x, y);
 			}
 		}
@@ -146,7 +149,7 @@ vector<Move> get_valid_moves(int color = currBotColor){
 		for(auto& new_p : move_positions){
 			// 临时棋盘，模拟移动到新位置
 			int temp_grid[GRIDSIZE][GRIDSIZE];
-			memcpy(temp_grid, gridInfo, sizeof(gridInfo));
+			memcpy(temp_grid, tpgrid, sizeof(int[GRIDSIZE][GRIDSIZE]));
 			temp_grid[p.x][p.y] = 0;
 			temp_grid[new_p.x][new_p.y] = color;
 
@@ -168,7 +171,7 @@ vector<Move> get_valid_moves(int color = currBotColor){
 
 // 使用广度优先搜索 (BFS) 计算所有空格到棋子的最短距离
 // mode: 1 为 Queen 走法, 2 为 King 走法
-void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
+void computeDistances(int color, int tpgrid[GRIDSIZE][GRIDSIZE], int distMap[GRIDSIZE][GRIDSIZE], int mode) {
     for (int i = 0; i < GRIDSIZE; ++i)
         for (int j = 0; j < GRIDSIZE; ++j)
             distMap[i][j] = 100; // 初始化为无穷大
@@ -176,7 +179,7 @@ void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
     queue<pair<int, int>> q;
     for (int i = 0; i < GRIDSIZE; ++i) {
         for (int j = 0; j < GRIDSIZE; ++j) {
-            if (gridInfo[i][j] == color) {
+            if (tpgrid[i][j] == color) {
                 distMap[i][j] = 0;
                 q.push({i, j});
             }
@@ -192,7 +195,7 @@ void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
             int ny = curr.second + dy[d];
 
             if (mode == 1) { // Queen 走法: 一次移动可跨越多个空格
-                while (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
+                while (inMap(nx, ny) && tpgrid[nx][ny] == 0) {
                     if (distMap[nx][ny] > nextDist) {
                         distMap[nx][ny] = nextDist;
                         q.push({nx, ny});
@@ -204,7 +207,7 @@ void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
                     ny += dy[d];
                 }
             } else { // King 走法: 一次只能走一步
-                if (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
+                if (inMap(nx, ny) && tpgrid[nx][ny] == 0) {
                     if (distMap[nx][ny] > distMap[curr.first][curr.second] + 1) {
                         distMap[nx][ny] = distMap[curr.first][curr.second] + 1;
                         q.push({nx, ny});
@@ -214,8 +217,9 @@ void computeDistances(int color, int distMap[GRIDSIZE][GRIDSIZE], int mode) {
         }
     }
 }
+
 //计算黑白棋子的灵活度， (Mobility) 这里使用简化法：统计可行着法数，并惩罚最小灵活度棋子
-double getMobilityScore(int color) {
+double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int totalMoves = 0;
     int minMoves = 9999; // 初始设为一个较大值，用于记录四个棋子中的最小值
     
@@ -223,7 +227,7 @@ double getMobilityScore(int color) {
     vector<Point> queens;
     for (int x = 0; x < GRIDSIZE; x++) {
         for (int y = 0; y < GRIDSIZE; y++) {
-            if (gridInfo[x][y] == color) {
+            if (tpgrid[x][y] == color) {
                 queens.emplace_back(x, y);
             }
         }
@@ -238,19 +242,18 @@ double getMobilityScore(int color) {
         
         for (auto& new_p : move_positions) {
             // 模拟移动：为了准确计算射箭位置，需要临时改变棋盘状态
-            int original_val = gridInfo[q.x][q.y];
-            gridInfo[q.x][q.y] = 0;
-            int target_original_val = gridInfo[new_p.x][new_p.y];
-            gridInfo[new_p.x][new_p.y] = color;
+            int original_val = tpgrid[q.x][q.y];
+            tpgrid[q.x][q.y] = 0;
+            int target_original_val = tpgrid[new_p.x][new_p.y];
+            tpgrid[new_p.x][new_p.y] = color;
 
             // 获取在该移动位置下能射箭的所有位置
-            // 注意：此处 get_arrow_pos 内部应使用当前的 gridInfo
-            vector<Point> arrows = get_arrow_pos(gridInfo, new_p);
+            vector<Point> arrows = get_arrow_pos(tpgrid, new_p);
             currentQueenMoves += (int)arrows.size();
 
             // 还原棋盘状态
-            gridInfo[new_p.x][new_p.y] = target_original_val;
-            gridInfo[q.x][q.y] = original_val;
+            tpgrid[new_p.x][new_p.y] = target_original_val;
+            tpgrid[q.x][q.y] = original_val;
         }
 
         // 累计总着法数
@@ -267,22 +270,23 @@ double getMobilityScore(int color) {
     // 根据论文公式：总灵活度 = 所有棋子着法总和 + 最小灵活度值 
     return (double)totalMoves + (double)minMoves;
 }
+
 // 评估函数核心实现
-double evaluate(int turnID) {
+double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
     int whiteDistQ[GRIDSIZE][GRIDSIZE], blackDistQ[GRIDSIZE][GRIDSIZE];
     int whiteDistK[GRIDSIZE][GRIDSIZE], blackDistK[GRIDSIZE][GRIDSIZE];
 
     // 1. 计算距离矩阵 [cite: 342, 470]
-    computeDistances(grid_white, whiteDistQ, 1);
-    computeDistances(grid_black, blackDistQ, 1);
-    computeDistances(grid_white, whiteDistK, 2);
-    computeDistances(grid_black, blackDistK, 2);
+    computeDistances(grid_white, tpgrid, whiteDistQ, 1);
+    computeDistances(grid_black, tpgrid, blackDistQ, 1);
+    computeDistances(grid_white, tpgrid, whiteDistK, 2);
+    computeDistances(grid_black, tpgrid, blackDistK, 2);
 
     double t1 = 0, t2 = 0, p1 = 0, p2 = 0;
 
     for (int i = 0; i < GRIDSIZE; i++) {
         for (int j = 0; j < GRIDSIZE; j++) {
-            if (gridInfo[i][j] != 0) continue;
+            if (tpgrid[i][j] != 0) continue;
 
             // Territory 计算 (t1: Queen, t2: King) [cite: 409]
             if (whiteDistQ[i][j] < blackDistQ[i][j]) t1 += 1.0;
@@ -299,7 +303,7 @@ double evaluate(int turnID) {
     }
 
     // 2. Mobility 计算 [cite: 452, 457, 458]
-    double m = getMobilityScore(grid_white) - getMobilityScore(grid_black);
+    double m = getMobilityScore(grid_white, tpgrid) - getMobilityScore(grid_black, tpgrid);
 
     // 3. 确定阶段权重 
     double a, b, c, d, e; 
@@ -318,6 +322,76 @@ double evaluate(int turnID) {
     return (currBotColor == grid_white) ? score : -score;
 }
 //----------------------------------评估函数结束--------------------------
+
+
+//----------------------------------MinMax算法---------------------------
+//模拟一步后的新棋盘
+void get_newgrid(int tmpgrid[GRIDSIZE][GRIDSIZE],Move &move, int color){
+    Point start = move.initgrid, newg = move.newgrid, arrow = move.arows;
+    tmpgrid[start.x][start.y] = 0;
+    tmpgrid[newg.x][newg.y] = color;
+    tmpgrid[arrow.x][arrow.y] = 2;
+}
+
+double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID){
+    if(depth == 0){
+        return evaluate(grid, turnID);
+    }
+
+    if(isMax){
+        vector<Move> moves = get_valid_moves(currBotColor, grid);
+        double maxScore = -1e9;
+
+        for(auto&m : moves){
+            int tmpgrid[GRIDSIZE][GRIDSIZE];
+            memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
+            get_newgrid(tmpgrid, m, currBotColor);
+
+            double tpscore = MinMax(tmpgrid, depth-1, false, turnID);
+            if(tpscore > maxScore){
+                maxScore = tpscore;
+            }
+        }
+        return maxScore;
+    }else{
+        vector<Move> moves = get_valid_moves((-1)*currBotColor, grid);
+        double minScore = 1e9;
+
+        for(auto&m : moves){
+            int tmpgrid[GRIDSIZE][GRIDSIZE];
+            memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
+            get_newgrid(tmpgrid, m, (-1) * currBotColor);
+
+            double tpscore = MinMax(tmpgrid, depth-1, true, turnID);
+            if(tpscore < minScore){
+                minScore = tpscore;
+            }
+        }
+        return minScore;
+    }
+}
+
+//MinMax
+Move getbestmove(int depth, int turnID){
+    vector<Move> moves = get_valid_moves(currBotColor, gridInfo);
+    int score = -1e9;
+    Move bestmove;
+    for(auto&m : moves){
+        int tmpgrid[GRIDSIZE][GRIDSIZE];
+        memcpy(tmpgrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
+        get_newgrid(tmpgrid, m, currBotColor);
+        double tpscore = MinMax(tmpgrid, depth - 1, false, turnID);
+        if(tpscore > score){
+            score = tpscore;
+            bestmove = m;
+        }
+    }
+    return bestmove;
+}
+
+
+
+//--------------------------------------------------------------------
 
 int main()
 {
@@ -365,10 +439,20 @@ int main()
 	/***在下面填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中*****/
 	//下面仅为随机策略的示例代码，且效率低，可删除
 	
+
+    // 调用 Minimax 搜索最优走法（深度 2，最稳不卡）
+    Move bestMove = getbestmove(2, turnID);
+
+    int startX = bestMove.initgrid.x;
+    int startY = bestMove.initgrid.y;
+    int resultX = bestMove.newgrid.x;
+    int resultY = bestMove.newgrid.y;
+    int obstacleX = bestMove.arows.x;
+    int obstacleY = bestMove.arows.y;
 	
 	/****在上方填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中****/
 	/*********************************************************************************************************/
 	
-	// cout << startX << ' ' << startY << ' ' << resultX << ' ' << resultY << ' ' << obstacleX << ' ' << obstacleY << endl;
+	cout << startX << ' ' << startY << ' ' << resultX << ' ' << resultY << ' ' << obstacleX << ' ' << obstacleY << endl;
 	return 0;
 }

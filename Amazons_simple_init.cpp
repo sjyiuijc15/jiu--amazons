@@ -324,7 +324,7 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
 //----------------------------------评估函数结束--------------------------
 
 
-//----------------------------------MinMax算法---------------------------
+//----------------------------------MinMax算法 + α-β剪枝---------------------------
 //模拟一步后的新棋盘
 void get_newgrid(int tmpgrid[GRIDSIZE][GRIDSIZE],Move &move, int color){
     Point start = move.initgrid, newg = move.newgrid, arrow = move.arows;
@@ -333,54 +333,66 @@ void get_newgrid(int tmpgrid[GRIDSIZE][GRIDSIZE],Move &move, int color){
     tmpgrid[arrow.x][arrow.y] = 2;
 }
 
-double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID){
+double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, double arfa, double beta){
     if(depth == 0){
         return evaluate(grid, turnID);
     }
 
     if(isMax){
         vector<Move> moves = get_valid_moves(currBotColor, grid);
-        double maxScore = -1e9;
+        double currentmax = -1e9;
 
         for(auto&m : moves){
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
             get_newgrid(tmpgrid, m, currBotColor);
 
-            double tpscore = MinMax(tmpgrid, depth-1, false, turnID);
-            if(tpscore > maxScore){
-                maxScore = tpscore;
+            double tpscore = MinMax(tmpgrid, depth-1, false, turnID, arfa, beta);
+            if(tpscore >= currentmax){
+                currentmax = tpscore;
+            }
+            //剪枝
+            if(currentmax > beta) break;
+            if(currentmax > arfa){
+                arfa = currentmax;
             }
         }
-        return maxScore;
+        return currentmax;
     }else{
         vector<Move> moves = get_valid_moves((-1)*currBotColor, grid);
-        double minScore = 1e9;
+        double currentmin = 1e9;
 
         for(auto&m : moves){
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
             get_newgrid(tmpgrid, m, (-1) * currBotColor);
 
-            double tpscore = MinMax(tmpgrid, depth-1, true, turnID);
-            if(tpscore < minScore){
-                minScore = tpscore;
+            double tpscore = MinMax(tmpgrid, depth-1, true, turnID, arfa, beta);
+            if(tpscore <= currentmin){
+                currentmin = tpscore;
             }
+            if(arfa >= currentmin){
+                break;
+            }
+            if(currentmin < beta){
+                beta = currentmin;
+            }
+            
         }
-        return minScore;
+        return currentmin;
     }
 }
 
 //MinMax
 Move getbestmove(int depth, int turnID){
     vector<Move> moves = get_valid_moves(currBotColor, gridInfo);
-    int score = -1e9;
+    double score = -1e9;
     Move bestmove;
     for(auto&m : moves){
         int tmpgrid[GRIDSIZE][GRIDSIZE];
         memcpy(tmpgrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
         get_newgrid(tmpgrid, m, currBotColor);
-        double tpscore = MinMax(tmpgrid, depth - 1, false, turnID);
+        double tpscore = MinMax(tmpgrid, depth - 1, false, turnID, -1e9, 1e9);
         if(tpscore > score){
             score = tpscore;
             bestmove = m;

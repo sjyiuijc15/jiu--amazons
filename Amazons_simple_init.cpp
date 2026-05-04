@@ -1,4 +1,4 @@
-
+#include<random>
 #include <iostream>
 #include <string>
 #include <cstdlib>
@@ -15,20 +15,109 @@
 #define judge_white 1
 #define grid_black 1
 #define grid_white -1
-
+clock_t start_time;
+bool stop_searching = false;
+// --- 计时函数 ---
+void startTimer() {
+    start_time = clock();
+}
+bool timeIsUp() {
+    // 留出 0.1s 缓冲，确保输出不超时
+    return (double)(clock() - start_time) / CLOCKS_PER_SEC > 0.9;
+}
+const int MAX_DEPTH = 20; // 迭代加深的最大深度，根据实际时间调整
 using namespace std;
 int currBotColor; // 本方所执子颜色（1为黑，-1为白，棋盘状态亦同）
 int gridInfo[GRIDSIZE][GRIDSIZE] = { 0 }; // 先x后y，记录棋盘状态
 int dx[] = { -1,-1,-1,0,0,1,1,1 };
 int dy[] = { -1,0,1,-1,1,-1,0,1 };
-
 // 评估因子结构体
 struct EvaluationResult {
     double t1, t2, p1, p2, m;
 };
+// 棋子坐标结构体
+struct Point{
+    int x; // 横坐标
+    int y; // 纵坐标
+    Point() : x(0), y(0) {} // 默认构造函数
+    Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
+};
 
 
+// 一步走法(原位置->移动->射箭)
+struct Move{
+	Point initgrid;
+	Point newgrid;
+	Point arows;
+	Move(Point init, Point newgrid, Point arows) : initgrid(init), newgrid(newgrid), arows(arows) {}
+    Move() {}
+};
 
+//置换表结构体
+struct TTEntry {
+    unsigned long long key; // Zobrist Hash
+    int depth;              // 搜索深度
+    double value;           // 评估分
+    int flag;              // 分数类型
+    Move bestMove;          // 在该局面下的最佳走法
+};
+const int TT_SIZE = 2<<20;
+// 建议开一个足够大的全局数组，例如 2^20 次方个条目
+TTEntry TT[TT_SIZE];
+// 1. 定义 Zobrist 随机数表
+// 状态映射：0->空格, 1->黑皇后, 2->白皇后, 3->障碍
+unsigned long long zobristTable[GRIDSIZE][GRIDSIZE][4];
+unsigned long long currentHash = 0;
+// 使用高质量的 64 位随机数生成器
+void initZobrist() {
+    std::mt19937_64 rng(12345); // 固定种子保证调试可复现，正式比赛可用 time(0)
+    for (int i = 0; i < GRIDSIZE; i++) {
+        for (int j = 0; j < GRIDSIZE; j++) {
+            for (int k = 0; k < 4; k++) {
+                zobristTable[i][j][k] = rng();
+            }
+        }
+    }
+}
+// 将棋盘数值映射到 0-3 的索引
+int getPieceIndex(int val) {
+    if (val == 0) return 0;           // 空
+    if (val == grid_black) return 1;  // 黑 (1)
+    if (val == grid_white) return 2;  // 白 (-1)
+    if (val == OBSTACLE) return 3;    // 障碍 (2)
+    return 0;
+}
+
+// 初始化当前棋盘的 Hash 值（仅在程序开始或重新加载棋盘时调用一次）
+unsigned long long computeInitialHash() {
+    unsigned long long h = 0;
+    for (int i = 0; i < GRIDSIZE; i++) {
+        for (int j = 0; j < GRIDSIZE; j++) {
+            int pieceIdx = getPieceIndex(gridInfo[i][j]);
+            if (pieceIdx != 0) { // 空格通常不参与异或，或者参与也行，保持一致即可
+                h ^= zobristTable[i][j][pieceIdx];
+            }
+        }
+    }
+    return h;
+}
+// 在模拟落子时同步更新 Hash
+// 纯函数：根据动作计算出新的 Hash 值，不改变全局变量
+unsigned long long updateHash(unsigned long long oldHash, int x0, int y0, int x1, int y1, int x2, int y2, int color) {
+    unsigned long long newHash = oldHash;
+    
+    // 1. 拿走旧位置的皇后 (x0, y0)
+    newHash ^= zobristTable[x0][y0][getPieceIndex(color)];
+    
+    // 2. 放入新位置的皇后 (x1, y1)
+    newHash ^= zobristTable[x1][y1][getPieceIndex(color)];
+    
+    // 3. 放入新射出的箭 (x2, y2)
+    // 特别注意：亚马逊棋射箭后的位置在这一步之前是空的
+    newHash ^= zobristTable[x2][y2][getPieceIndex(OBSTACLE)];
+    
+    return newHash;
+}
 // 判断是否在棋盘内
 inline bool inMap(int x, int y)
 {
@@ -55,25 +144,6 @@ bool ProcStep(int x0, int y0, int x1, int y1, int x2, int y2, int color, bool ch
 	}
 	return true;
 }
-
-
-// 棋子坐标结构体
-struct Point{
-    int x; // 横坐标
-    int y; // 纵坐标
-    Point() : x(0), y(0) {} // 默认构造函数
-    Point(int x0, int y0) : x(x0), y(y0) {} // 构造函数
-};
-
-
-// 一步走法(原位置->移动->射箭)
-struct Move{
-	Point initgrid;
-	Point newgrid;
-	Point arows;
-	Move(Point init, Point newgrid, Point arows) : initgrid(init), newgrid(newgrid), arows(arows) {}
-    Move() {}
-};
 
 
 // part2.1: 判断格子能不能走
@@ -333,82 +403,206 @@ void get_newgrid(int tmpgrid[GRIDSIZE][GRIDSIZE],Move &move, int color){
     tmpgrid[arrow.x][arrow.y] = 2;
 }
 
-double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, double arfa, double beta){
-    if(depth == 0){
+// 判断两步走法是否完全相同的辅助函数（如果你的 Move 结构体没有重载 == 运算符的话）
+bool isSameMove(const Move& m1, const Move& m2) {
+    return m1.initgrid.x == m2.initgrid.x && m1.initgrid.y == m2.initgrid.y &&
+           m1.newgrid.x == m2.newgrid.x && m1.newgrid.y == m2.newgrid.y &&
+           m1.arows.x == m2.arows.x && m1.arows.y == m2.arows.y;
+}
+
+double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, double arfa, double beta, unsigned long long h) {
+   //检查超时
+    if (stop_searching || timeIsUp()) {
+        stop_searching = true;
+        return 0; 
+    }
+    int index = h & (TT_SIZE - 1);
+    Move bestMoveFromTT;
+    bool hasBestMoveFromTT = false;
+    // 1. 查表：不仅查分数，还要尝试提取最佳走法
+    if (TT[index].key == h) {
+        // 只要这个局面曾被搜索过，就把当时认为最好的走法拿出来（用于走法排序）
+        bestMoveFromTT = TT[index].bestMove;
+        hasBestMoveFromTT = true;
+
+        // 如果表中的深度足够，才直接返回分数
+        if (TT[index].depth >= depth) {
+            if (TT[index].flag == 0) return TT[index].value; // 精确值直接用
+            if (TT[index].flag == 1 && TT[index].value >= beta) return TT[index].value; // Beta 剪枝
+            if (TT[index].flag == 2 && TT[index].value <= arfa) return TT[index].value; // Alpha 剪枝
+        }
+    }
+
+    // 触底调用评估函数
+    if (depth == 0) {
         return evaluate(grid, turnID);
     }
 
-    if(isMax){
+    Move bestMoveInThisNode; // 用于记录当前层表现最好的走法
+    bool foundBest = false;  // 标记是否找到了有效走法
+
+    if (isMax) {
         vector<Move> moves = get_valid_moves(currBotColor, grid);
         double currentmax = -1e9;
 
-        for(auto&m : moves){
+        // 【关键优化：走法排序 Move Ordering】
+        if (hasBestMoveFromTT && !moves.empty()) {
+            for (size_t i = 0; i < moves.size(); i++) {
+                if (isSameMove(moves[i], bestMoveFromTT)) {
+                    // 找到了历史最佳走法！将它与第0个走法交换位置，确保它被第一个搜索
+                    swap(moves[0], moves[i]);
+                    break;
+                }
+            }
+        }
+
+        for (auto& m : moves) {
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
             get_newgrid(tmpgrid, m, currBotColor);
 
-            double tpscore = MinMax(tmpgrid, depth-1, false, turnID, arfa, beta);
-            if(tpscore >= currentmax){
+            unsigned long long next_h = updateHash(h, m.initgrid.x, m.initgrid.y, 
+                                                   m.newgrid.x, m.newgrid.y, 
+                                                   m.arows.x, m.arows.y, currBotColor);
+            
+            double tpscore = MinMax(tmpgrid, depth-1, false, turnID, arfa, beta, next_h);
+            
+            if (tpscore > currentmax) {
                 currentmax = tpscore;
+                bestMoveInThisNode = m; // 记录产生最高分的走法
+                foundBest = true;
             }
-            //剪枝
-            if(currentmax > beta) break;
-            if(currentmax > arfa){
-                arfa = currentmax;
-            }
+            
+            // 剪枝逻辑
+            if (currentmax > beta) break; // Beta 剪枝
+            if (currentmax > arfa) arfa = currentmax; // 更新 Alpha
         }
+
+        // 2. 存表前，记录最佳走法
+      // 只有当新搜索更深（更准）时才更新
+if (TT[index].key != h || depth >= TT[index].depth) {
+    TT[index].key = h;
+    TT[index].depth = depth;
+    TT[index].value = currentmax; // 或 currentmin
+    if (foundBest) {
+        TT[index].bestMove = bestMoveInThisNode; // 记录当前层的最佳走法
+    }
+     // 设置 flag
+        if (currentmax <= arfa) {
+            TT[index].flag = 2; // 上界 (Alpha 剪枝)
+        } else if (currentmax >= beta) {
+            TT[index].flag = 1; // 下界 (Beta 剪枝)
+        } else {
+            TT[index].flag = 0; // 精确值
+        }
+}
+       
         return currentmax;
-    }else{
+        
+    } else {
+        // Min 层逻辑（对手回合）
         vector<Move> moves = get_valid_moves((-1)*currBotColor, grid);
         double currentmin = 1e9;
 
-        for(auto&m : moves){
+        // 【关键优化：走法排序 Move Ordering】
+        if (hasBestMoveFromTT && !moves.empty()) {
+            for (size_t i = 0; i < moves.size(); i++) {
+                if (isSameMove(moves[i], bestMoveFromTT)) {
+                    swap(moves[0], moves[i]); // 对手的最优走法也要优先搜索
+                    break;
+                }
+            }
+        }
+
+        for (auto& m : moves) {
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
             get_newgrid(tmpgrid, m, (-1) * currBotColor);
 
-            double tpscore = MinMax(tmpgrid, depth-1, true, turnID, arfa, beta);
-            if(tpscore <= currentmin){
+            unsigned long long next_h = updateHash(h, m.initgrid.x, m.initgrid.y, 
+                                                   m.newgrid.x, m.newgrid.y, 
+                                                   m.arows.x, m.arows.y, (-1) * currBotColor);
+            
+            double tpscore = MinMax(tmpgrid, depth-1, true, turnID, arfa, beta, next_h);
+            
+            if (tpscore < currentmin) { // 注意这里是小于
                 currentmin = tpscore;
-            }
-            if(arfa >= currentmin){
-                break;
-            }
-            if(currentmin < beta){
-                beta = currentmin;
+                bestMoveInThisNode = m; // 记录让对手得分最低（对我方最不利）的走法
+                foundBest = true;
             }
             
+            // 剪枝逻辑
+            if (currentmin < arfa) break; // Alpha 剪枝 (由于上层传下来的是arfa, 此处直接用arfa判断也是等价的, 但严格写是 currentmin <= arfa)
+            if (currentmin < beta) beta = currentmin; // 更新 Beta
         }
-        return currentmin;
+
+        // 2. 存表前，记录最佳走法
+      // 只有当新搜索更深（更准）时才更新
+if (TT[index].key != h || depth >= TT[index].depth) {
+    TT[index].key = h;
+    TT[index].depth = depth;
+    TT[index].value = currentmin; // 或 currentmin
+    if (foundBest) {
+        TT[index].bestMove = bestMoveInThisNode; // 记录当前层的最佳走法
+    }
+     // 设置 flag
+        if (currentmin <= arfa) {
+            TT[index].flag = 2; // 上界 (Alpha 剪枝)
+        } else if (currentmin >= beta) {
+            TT[index].flag = 1; // 下界 (Beta 剪枝)
+        } else {
+            TT[index].flag = 0; // 精确值
+        }
+
+}
+return currentmin;
     }
 }
-
-//MinMax
-Move getbestmove(int depth, int turnID){
-    vector<Move> moves = get_valid_moves(currBotColor, gridInfo);
-    double score = -1e9;
-    Move bestmove;
-    for(auto&m : moves){
-        int tmpgrid[GRIDSIZE][GRIDSIZE];
-        memcpy(tmpgrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
-        get_newgrid(tmpgrid, m, currBotColor);
-        double tpscore = MinMax(tmpgrid, depth - 1, false, turnID, -1e9, 1e9);
-        if(tpscore > score){
-            score = tpscore;
-            bestmove = m;
+/// MTDF 搜索框架
+double MTDF(unsigned long long h, double f, int depth, int turnID) {
+    double g = f;
+    double upperbound = 1e9;
+    double lowerbound = -1e9;
+    
+    while (lowerbound < upperbound-0.001) {
+        // 设定一个极窄的“零窗口” [beta-1, beta]
+        double beta = (g == lowerbound) ? g + 0.01 : g;
+        
+        // 调用你已经写好的带 TT 的 MinMax
+        // 注意：这里的 alpha 是 beta - 0.01 (或者是很小的量，确保窗口极窄)
+        g = MinMax(gridInfo, depth, true, turnID, beta - 0.01, beta, h);
+        if(stop_searching) break; // 如果搜索过程中发现时间到了，直接退出
+        if (g < beta) {
+            upperbound = g;
+        } else {
+            lowerbound = g;
         }
     }
-    return bestmove;
+    return g;
 }
-
-
-
+// //MinMax
+// Move getbestmove(int depth, int turnID){
+//     vector<Move> moves = get_valid_moves(currBotColor, gridInfo);
+//     double score = -1e9;
+//     Move bestmove;
+//     for(auto&m : moves){
+//         int tmpgrid[GRIDSIZE][GRIDSIZE];
+//         memcpy(tmpgrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
+//         get_newgrid(tmpgrid, m, currBotColor);
+//         unsigned long long h = updateHash(currentHash, m.initgrid.x, m.initgrid.y, m.newgrid.x, m.newgrid.y, m.arows.x, m.arows.y, currBotColor);
+//         double tpscore = MinMax(tmpgrid, depth - 1, false, turnID, -1e9, 1e9, h);
+//         if(tpscore > score){
+//             score = tpscore;
+//             bestmove = m;
+//         }
+//     }
+//     return bestmove;
+// }
 //--------------------------------------------------------------------
 
 int main()
 {
 	int x0, y0, x1, y1, x2, y2;
-
 	// 初始化棋盘
 	gridInfo[0][2] = grid_black;
 	gridInfo[2][0] = grid_black;
@@ -419,7 +613,9 @@ int main()
 	gridInfo[2][7] = grid_white;
 	gridInfo[5][7] = grid_white;
 	gridInfo[7][5] = grid_white;
-
+//初始化Zobrist表和初始Hash值
+    initZobrist();
+currentHash = computeInitialHash();
 	// 分析自己收到的输入和自己过往的输出，并恢复棋盘状态
 	int turnID;
 	cin >> turnID;
@@ -433,34 +629,48 @@ int main()
 		cin >> x0 >> y0 >> x1 >> y1 >> x2 >> y2;
 		if (x0 == -1)
 			currBotColor = grid_black; // 第一回合收到坐标是-1, -1，说明我方是黑方
-		else
+		else{
 			ProcStep(x0, y0, x1, y1, x2, y2, -currBotColor, false); // 模拟对方落子
-
-																	// 然后是本方当时的行动
+currentHash = updateHash(currentHash, x0, y0, x1, y1, x2, y2, -currBotColor);
+    }
+        															// 然后是本方当时的行动
 																	// 对手行动总比自己行动多一个
 		if (i < turnID - 1)
 		{
 			cin >> x0 >> y0 >> x1 >> y1 >> x2 >> y2;
-			if (x0 >= 0)
+			if (x0 >= 0){
 				ProcStep(x0, y0, x1, y1, x2, y2, currBotColor, false); // 模拟本方落子
-		}
+		currentHash = updateHash(currentHash, x0, y0, x1, y1, x2, y2, currBotColor);
+    }
 	}
-
-	
+    }
 	/*********************************************************************************************************/
 	/***在下面填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中*****/
-	//下面仅为随机策略的示例代码，且效率低，可删除
-	
+    startTimer(); // [新增] 启动计时
+    stop_searching = false;
+    Move overallBestMove;
+    double last_score = 0;
+for (int d = 1; d <= MAX_DEPTH; d++) {
+   double current_score = MTDF(currentHash, last_score, d, turnID);
+        
+        if (stop_searching) break; // 如果这一层搜到一半超时了，不采用这一层的结果
 
-    // 调用 Minimax 搜索最优走法（深度 2，最稳不卡）
-    Move bestMove = getbestmove(2, turnID);
-
-    int startX = bestMove.initgrid.x;
-    int startY = bestMove.initgrid.y;
-    int resultX = bestMove.newgrid.x;
-    int resultY = bestMove.newgrid.y;
-    int obstacleX = bestMove.arows.x;
-    int obstacleY = bestMove.arows.y;
+        last_score = current_score;
+        
+        // 只有完整搜完这一层，才更新“全局最佳走法”
+        int index = currentHash & (TT_SIZE - 1);
+        if (TT[index].key == currentHash) {
+            overallBestMove = TT[index].bestMove;
+        }
+}
+// 最后输出
+    int startX = overallBestMove.initgrid.x;
+    int startY = overallBestMove.initgrid.y;  
+    int resultX = overallBestMove.newgrid.x;
+    int resultY = overallBestMove.newgrid.y;
+    int obstacleX = overallBestMove.arows.x;
+    int obstacleY = overallBestMove.arows.y;
+    
 	
 	/****在上方填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中****/
 	/*********************************************************************************************************/

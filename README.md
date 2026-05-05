@@ -1,1 +1,1 @@
-# jiu--amazons
+吉大软件24级学生botzone平台amazons项目作业

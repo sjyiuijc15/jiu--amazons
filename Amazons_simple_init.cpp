@@ -158,7 +158,7 @@ bool LegalStep(int x, int y, int grid_info[GRIDSIZE][GRIDSIZE]){
 
 
 // part2.2: 一个亚马逊能移动到哪些位置
-vector<Point> get_move_pos(Point cu_point) {
+vector<Point> get_move_pos(Point cu_point, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     vector<Point> vecpo;
     // 8个方向
     for (int d = 0; d < 8; d++) {
@@ -167,7 +167,7 @@ vector<Point> get_move_pos(Point cu_point) {
         while (true) {
             px += dx[d];
             py += dy[d];
-            if (LegalStep(px, py, gridInfo)) {
+            if (LegalStep(px, py, tpgrid)) {
                 vecpo.emplace_back(px, py);
             } else {
                 break;
@@ -214,7 +214,7 @@ vector<Move> get_valid_moves(int color, int tpgrid[GRIDSIZE][GRIDSIZE]){
 	}
 
 	for(auto& p : starts){
-		vector<Point> move_positions = get_move_pos(p);
+		vector<Point> move_positions = get_move_pos(p, tpgrid);
 
 		for(auto& new_p : move_positions){
 			// 临时棋盘，模拟移动到新位置
@@ -308,7 +308,7 @@ double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
         int currentQueenMoves = 0;
         
         // 获取该棋子一步之内能到达的所有位置（Queen走法）
-        vector<Point> move_positions = get_move_pos(q);
+        vector<Point> move_positions = get_move_pos(q, tpgrid);
         
         for (auto& new_p : move_positions) {
             // 模拟移动：为了准确计算射箭位置，需要临时改变棋盘状态

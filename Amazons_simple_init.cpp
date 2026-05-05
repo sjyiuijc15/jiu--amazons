@@ -410,6 +410,11 @@ bool isSameMove(const Move& m1, const Move& m2) {
            m1.arows.x == m2.arows.x && m1.arows.y == m2.arows.y;
 }
 
+double terminalScore(bool isMaxPlayer) {
+    // 当前层无棋可走：若轮到我方（Max）则失败，若轮到对手（Min）则成功
+    return isMaxPlayer ? -1e8 : 1e8;
+}
+
 double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, double arfa, double beta, unsigned long long h) {
    //检查超时
     if (stop_searching || timeIsUp()) {
@@ -419,6 +424,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
     int index = h & (TT_SIZE - 1);
     Move bestMoveFromTT;
     bool hasBestMoveFromTT = false;
+    const double alphaOrig = arfa;
+    const double betaOrig = beta;
     // 1. 查表：不仅查分数，还要尝试提取最佳走法
     if (TT[index].key == h) {
         // 只要这个局面曾被搜索过，就把当时认为最好的走法拿出来（用于走法排序）
@@ -443,6 +450,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
 
     if (isMax) {
         vector<Move> moves = get_valid_moves(currBotColor, grid);
+        if (moves.empty()) return terminalScore(true);
         double currentmax = -1e9;
 
         // 【关键优化：走法排序 Move Ordering】
@@ -488,9 +496,9 @@ if (TT[index].key != h || depth >= TT[index].depth) {
         TT[index].bestMove = bestMoveInThisNode; // 记录当前层的最佳走法
     }
      // 设置 flag
-        if (currentmax <= arfa) {
+        if (currentmax <= alphaOrig) {
             TT[index].flag = 2; // 上界 (Alpha 剪枝)
-        } else if (currentmax >= beta) {
+        } else if (currentmax >= betaOrig) {
             TT[index].flag = 1; // 下界 (Beta 剪枝)
         } else {
             TT[index].flag = 0; // 精确值
@@ -502,6 +510,7 @@ if (TT[index].key != h || depth >= TT[index].depth) {
     } else {
         // Min 层逻辑（对手回合）
         vector<Move> moves = get_valid_moves((-1)*currBotColor, grid);
+        if (moves.empty()) return terminalScore(false);
         double currentmin = 1e9;
 
         // 【关键优化：走法排序 Move Ordering】
@@ -546,9 +555,9 @@ if (TT[index].key != h || depth >= TT[index].depth) {
         TT[index].bestMove = bestMoveInThisNode; // 记录当前层的最佳走法
     }
      // 设置 flag
-        if (currentmin <= arfa) {
+        if (currentmin <= alphaOrig) {
             TT[index].flag = 2; // 上界 (Alpha 剪枝)
-        } else if (currentmin >= beta) {
+        } else if (currentmin >= betaOrig) {
             TT[index].flag = 1; // 下界 (Beta 剪枝)
         } else {
             TT[index].flag = 0; // 精确值
@@ -648,7 +657,8 @@ currentHash = updateHash(currentHash, x0, y0, x1, y1, x2, y2, -currBotColor);
 	/***在下面填充你的代码，决策结果（本方将落子的位置）存入startX、startY、resultX、resultY、obstacleX、obstacleY中*****/
     startTimer(); // [新增] 启动计时
     stop_searching = false;
-    Move overallBestMove;
+    vector<Move> rootMoves = get_valid_moves(currBotColor, gridInfo);
+    Move overallBestMove = rootMoves.empty() ? Move() : rootMoves[0];
     double last_score = 0;
 for (int d = 1; d <= MAX_DEPTH; d++) {
    double current_score = MTDF(currentHash, last_score, d, turnID);

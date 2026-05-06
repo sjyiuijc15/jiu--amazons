@@ -26,7 +26,7 @@ bool timeIsUp() {
     const double elapsed = (double)(clock() - start_time) / CLOCKS_PER_SEC;
     return elapsed > 0.93;
 }
-const int MAX_DEPTH = 20; // 迭代加深的最大深度，根据实际时间调整
+const int MAX_DEPTH =1000; // 迭代加深的最大深度，根据实际时间调整
 using namespace std;
 int currBotColor; // 本方所执子颜色（1为黑，-1为白，棋盘状态亦同）
 int gridInfo[GRIDSIZE][GRIDSIZE] = { 0 }; // 先x后y，记录棋盘状态

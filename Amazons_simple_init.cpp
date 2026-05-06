@@ -311,57 +311,38 @@ void computeDistances(int color, int tpgrid[GRIDSIZE][GRIDSIZE], int distMap[GRI
     }
 }
 
-//计算黑白棋子的灵活度， (Mobility) 这里使用简化法：统计可行着法数，并惩罚最小灵活度棋子
+// 轻量 Mobility：只统计每个皇后的可达空格数（不展开射箭）
+// 速度比完整合法步统计快很多，更适合 1s 时限下的深搜。
+int reachableCountFromQueen(const Point& q, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    int count = 0;
+    for (int d = 0; d < 8; ++d) {
+        int x = q.x + dx[d], y = q.y + dy[d];
+        while (inMap(x, y) && tpgrid[x][y] == 0) {
+            ++count;
+            x += dx[d];
+            y += dy[d];
+        }
+    }
+    return count;
+}
+
 double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
-    int totalMoves = 0;
-    int minMoves = 9999; // 初始设为一个较大值，用于记录四个棋子中的最小值
-    
-    // 1. 找到当前颜色（我方或对方）的所有棋子位置
-    vector<Point> queens;
-    for (int x = 0; x < GRIDSIZE; x++) {
-        for (int y = 0; y < GRIDSIZE; y++) {
-            if (tpgrid[x][y] == color) {
-                queens.emplace_back(x, y);
-            }
+    int totalReach = 0;
+    int minReach = 9999;
+    int queenCnt = 0;
+
+    for (int x = 0; x < GRIDSIZE; ++x) {
+        for (int y = 0; y < GRIDSIZE; ++y) {
+            if (tpgrid[x][y] != color) continue;
+            ++queenCnt;
+            int reach = reachableCountFromQueen(Point(x, y), tpgrid);
+            totalReach += reach;
+            minReach = min(minReach, reach);
         }
     }
 
-    // 2. 遍历每一个皇后，计算其可行着法
-    for (auto& q : queens) {
-        int currentQueenMoves = 0;
-        
-        // 获取该棋子一步之内能到达的所有位置（Queen走法）
-        vector<Point> move_positions = get_move_pos(q, tpgrid);
-        
-        for (auto& new_p : move_positions) {
-            // 模拟移动：为了准确计算射箭位置，需要临时改变棋盘状态
-            int original_val = tpgrid[q.x][q.y];
-            tpgrid[q.x][q.y] = 0;
-            int target_original_val = tpgrid[new_p.x][new_p.y];
-            tpgrid[new_p.x][new_p.y] = color;
-
-            // 获取在该移动位置下能射箭的所有位置
-            vector<Point> arrows = get_arrow_pos(tpgrid, new_p);
-            currentQueenMoves += (int)arrows.size();
-
-            // 还原棋盘状态
-            tpgrid[new_p.x][new_p.y] = target_original_val;
-            tpgrid[q.x][q.y] = original_val;
-        }
-
-        // 累计总着法数
-        totalMoves += currentQueenMoves;
-        // 记录四个棋子中“最不灵活”的那个棋子的着法数 
-        if (currentQueenMoves < minMoves) {
-            minMoves = currentQueenMoves;
-        }
-    }
-
-    // 如果该色棋子已经全部无法移动，minMoves 应设为 0
-    if (queens.empty() || minMoves == 9999) minMoves = 0;
-
-    // 根据论文公式：总灵活度 = 所有棋子着法总和 + 最小灵活度值 
-    return (double)totalMoves + (double)minMoves;
+    if (queenCnt == 0 || minReach == 9999) minReach = 0;
+    return (double)totalReach + (double)minReach;
 }
 
 // 评估函数核心实现

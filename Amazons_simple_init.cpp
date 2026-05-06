@@ -22,8 +22,9 @@ void startTimer() {
     start_time = clock();
 }
 bool timeIsUp() {
-    // 留出 0.1s 缓冲，确保输出不超时
-    return (double)(clock() - start_time) / CLOCKS_PER_SEC > 0.9;
+    // Botzone 单步通常 1s，动态缓冲防抖
+    const double elapsed = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+    return elapsed > 0.93;
 }
 const int MAX_DEPTH = 20; // 迭代加深的最大深度，根据实际时间调整
 using namespace std;
@@ -237,6 +238,28 @@ vector<Move> get_valid_moves(int color, int tpgrid[GRIDSIZE][GRIDSIZE]){
 
 	return all_valid_moves;
 }
+
+// 轻量级走法排序：优先中心、长位移、封锁对手邻域
+inline int centerScore(const Point& p) {
+    return 7 - (abs(p.x - 3) + abs(p.y - 3));
+}
+
+int quickMoveScore(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    int score = 0;
+    score += centerScore(m.newgrid) * 6;
+    score += centerScore(m.arows) * 2;
+
+    // 位移越长通常空间越大
+    score += max(abs(m.newgrid.x - m.initgrid.x), abs(m.newgrid.y - m.initgrid.y)) * 2;
+
+    // 箭周围若是对手棋子，优先考虑（更可能形成封锁）
+    int opp = -color;
+    for (int d = 0; d < 8; ++d) {
+        int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
+        if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 8;
+    }
+    return score;
+}
 //----------------------------------评估函数开始--------------------------
 
 // 使用广度优先搜索 (BFS) 计算所有空格到棋子的最短距离
@@ -288,57 +311,38 @@ void computeDistances(int color, int tpgrid[GRIDSIZE][GRIDSIZE], int distMap[GRI
     }
 }
 
-//计算黑白棋子的灵活度， (Mobility) 这里使用简化法：统计可行着法数，并惩罚最小灵活度棋子
+// 轻量 Mobility：只统计每个皇后的可达空格数（不展开射箭）
+// 速度比完整合法步统计快很多，更适合 1s 时限下的深搜。
+int reachableCountFromQueen(const Point& q, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    int count = 0;
+    for (int d = 0; d < 8; ++d) {
+        int x = q.x + dx[d], y = q.y + dy[d];
+        while (inMap(x, y) && tpgrid[x][y] == 0) {
+            ++count;
+            x += dx[d];
+            y += dy[d];
+        }
+    }
+    return count;
+}
+
 double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
-    int totalMoves = 0;
-    int minMoves = 9999; // 初始设为一个较大值，用于记录四个棋子中的最小值
-    
-    // 1. 找到当前颜色（我方或对方）的所有棋子位置
-    vector<Point> queens;
-    for (int x = 0; x < GRIDSIZE; x++) {
-        for (int y = 0; y < GRIDSIZE; y++) {
-            if (tpgrid[x][y] == color) {
-                queens.emplace_back(x, y);
-            }
+    int totalReach = 0;
+    int minReach = 9999;
+    int queenCnt = 0;
+
+    for (int x = 0; x < GRIDSIZE; ++x) {
+        for (int y = 0; y < GRIDSIZE; ++y) {
+            if (tpgrid[x][y] != color) continue;
+            ++queenCnt;
+            int reach = reachableCountFromQueen(Point(x, y), tpgrid);
+            totalReach += reach;
+            minReach = min(minReach, reach);
         }
     }
 
-    // 2. 遍历每一个皇后，计算其可行着法
-    for (auto& q : queens) {
-        int currentQueenMoves = 0;
-        
-        // 获取该棋子一步之内能到达的所有位置（Queen走法）
-        vector<Point> move_positions = get_move_pos(q, tpgrid);
-        
-        for (auto& new_p : move_positions) {
-            // 模拟移动：为了准确计算射箭位置，需要临时改变棋盘状态
-            int original_val = tpgrid[q.x][q.y];
-            tpgrid[q.x][q.y] = 0;
-            int target_original_val = tpgrid[new_p.x][new_p.y];
-            tpgrid[new_p.x][new_p.y] = color;
-
-            // 获取在该移动位置下能射箭的所有位置
-            vector<Point> arrows = get_arrow_pos(tpgrid, new_p);
-            currentQueenMoves += (int)arrows.size();
-
-            // 还原棋盘状态
-            tpgrid[new_p.x][new_p.y] = target_original_val;
-            tpgrid[q.x][q.y] = original_val;
-        }
-
-        // 累计总着法数
-        totalMoves += currentQueenMoves;
-        // 记录四个棋子中“最不灵活”的那个棋子的着法数 
-        if (currentQueenMoves < minMoves) {
-            minMoves = currentQueenMoves;
-        }
-    }
-
-    // 如果该色棋子已经全部无法移动，minMoves 应设为 0
-    if (queens.empty() || minMoves == 9999) minMoves = 0;
-
-    // 根据论文公式：总灵活度 = 所有棋子着法总和 + 最小灵活度值 
-    return (double)totalMoves + (double)minMoves;
+    if (queenCnt == 0 || minReach == 9999) minReach = 0;
+    return (double)totalReach + (double)minReach;
 }
 
 // 评估函数核心实现
@@ -419,7 +423,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
    //检查超时
     if (stop_searching || timeIsUp()) {
         stop_searching = true;
-        return 0; 
+        return evaluate(grid, turnID); 
     }
     int index = h & (TT_SIZE - 1);
     Move bestMoveFromTT;
@@ -452,6 +456,10 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
         vector<Move> moves = get_valid_moves(currBotColor, grid);
         if (moves.empty()) return terminalScore(true);
         double currentmax = -1e9;
+
+        stable_sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b){
+            return quickMoveScore(a, currBotColor, grid) > quickMoveScore(b, currBotColor, grid);
+        });
 
         // 【关键优化：走法排序 Move Ordering】
         if (hasBestMoveFromTT && !moves.empty()) {
@@ -512,6 +520,10 @@ if (TT[index].key != h || depth >= TT[index].depth) {
         vector<Move> moves = get_valid_moves((-1)*currBotColor, grid);
         if (moves.empty()) return terminalScore(false);
         double currentmin = 1e9;
+
+        stable_sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b){
+            return quickMoveScore(a, -currBotColor, grid) > quickMoveScore(b, -currBotColor, grid);
+        });
 
         // 【关键优化：走法排序 Move Ordering】
         if (hasBestMoveFromTT && !moves.empty()) {
@@ -673,6 +685,19 @@ for (int d = 1; d <= MAX_DEPTH; d++) {
             overallBestMove = TT[index].bestMove;
         }
 }
+
+if (rootMoves.empty()) {
+    cout << "-1 -1 -1 -1 -1 -1" << endl;
+    return 0;
+}
+
+// 兜底：若 TT 给出异常走法则退回首个合法走法
+bool legalBest = false;
+for (auto &m : rootMoves) {
+    if (isSameMove(m, overallBestMove)) { legalBest = true; break; }
+}
+if (!legalBest) overallBestMove = rootMoves[0];
+
 // 最后输出
     int startX = overallBestMove.initgrid.x;
     int startY = overallBestMove.initgrid.y;  

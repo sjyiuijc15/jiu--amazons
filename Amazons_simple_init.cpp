@@ -41,7 +41,8 @@ bool timeIsUp() {
 }
 
 // 历史启发表：记录优质走法，用于走法排序优化 [玩家][x][y]
-int history[2][GRIDSIZE][GRIDSIZE] = {0};
+int historyFrom[2][GRIDSIZE][GRIDSIZE] = {0};
+int historyTo[2][GRIDSIZE][GRIDSIZE] = {0};
 
 // 迭代加深最大搜索深度
 const int MAX_DEPTH = 1000;
@@ -486,8 +487,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
         // 走法排序：历史启发优先 + 快速评分
         stable_sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b) {
             int cidx = (currBotColor == grid_black) ? 0 : 1;
-            int ha = history[cidx][a.initgrid.x][a.initgrid.y];
-            int hb = history[cidx][b.initgrid.x][b.initgrid.y];
+            int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
+            int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
             return quickMoveScore(a, currBotColor, grid) > quickMoveScore(b, currBotColor, grid);
         });
@@ -526,7 +527,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             // β剪枝，更新历史启发
             if (currentmax > beta) {
                 int cidx = (currBotColor == grid_black) ? 0 : 1;
-                history[cidx][m.initgrid.x][m.initgrid.y] += 120;
+                historyFrom[cidx][m.initgrid.x][m.initgrid.y] += depth * depth;
+                historyTo[cidx][m.newgrid.x][m.newgrid.y] += depth * depth;
                 break;
             }
             if (currentmax > arfa) arfa = currentmax;
@@ -554,8 +556,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
         stable_sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b) {
             int oppColor = -currBotColor;
             int cidx = (oppColor == grid_black) ? 0 : 1;
-            int ha = history[cidx][a.initgrid.x][a.initgrid.y];
-            int hb = history[cidx][b.initgrid.x][b.initgrid.y];
+            int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
+            int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
             return quickMoveScore(a, oppColor, grid) > quickMoveScore(b, oppColor, grid);
         });
@@ -593,7 +595,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             if (currentmin < arfa) {
                 int oppColor = -currBotColor;
                 int cidx = (oppColor == grid_black) ? 0 : 1;
-                history[cidx][m.initgrid.x][m.initgrid.y] += 120;
+                historyFrom[cidx][m.initgrid.x][m.initgrid.y] += depth * depth;
+                historyTo[cidx][m.newgrid.x][m.newgrid.y] += depth * depth;
                 break;
             }
             if (currentmin < beta) beta = currentmin;
@@ -686,8 +689,19 @@ int main() {
     double last_score = 0;
 
     // 迭代加深搜索：1层到最大层
+    memset(historyFrom, 0, sizeof(historyFrom));
+    memset(historyTo, 0, sizeof(historyTo));
     for (int d = 1; d <= MAX_DEPTH; d++) {
-        memset(history, 0, sizeof(history));  // 每层清空历史表
+        if (d > 1) {
+            for (int c = 0; c < 2; ++c) {
+                for (int i = 0; i < GRIDSIZE; ++i) {
+                    for (int j = 0; j < GRIDSIZE; ++j) {
+                        historyFrom[c][i][j] = historyFrom[c][i][j] * 9 / 10;
+                        historyTo[c][i][j] = historyTo[c][i][j] * 9 / 10;
+                    }
+                }
+            }
+        }
         double current_score = MTDF(currentHash, last_score, d, turnID);
 
         if (stop_searching) break;

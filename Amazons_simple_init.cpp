@@ -503,7 +503,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             }
         }
 
-        // 遍历所有走法
+        // 遍历所有走法（PVS：首着全窗口，后续先零窗口，失败再重搜）
+        bool firstMove = true;
         for (auto& m : moves) {
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
@@ -514,8 +515,21 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
                 m.newgrid.x, m.newgrid.y,
                 m.arows.x, m.arows.y, currBotColor);
 
-            // 递归搜索
-            double tpscore = MinMax(tmpgrid, depth - 1, false, turnID, arfa, beta, next_h);
+            // PVS搜索（首着全窗口，后续零窗口试探）
+            double tpscore;
+            if (firstMove) {
+                // PV走法：全窗口搜索
+                tpscore = MinMax(tmpgrid, depth - 1, false, turnID, arfa, beta, next_h);
+                firstMove = false;
+            }
+            else {
+                // 非PV走法：先零窗口试探
+                tpscore = MinMax(tmpgrid, depth - 1, false, turnID, arfa, arfa + 0.01, next_h);
+                // fail-high，再全窗口重搜
+                if (tpscore > arfa && tpscore < beta) {
+                    tpscore = MinMax(tmpgrid, depth - 1, false, turnID, arfa, beta, next_h);
+                }
+            }
 
             // 更新最大值
             if (tpscore > currentmax) {
@@ -572,7 +586,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             }
         }
 
-        // 遍历所有走法
+        // 遍历所有走法（PVS：首着全窗口，后续先零窗口，失败再重搜）
+        bool firstMove = true;
         for (auto& m : moves) {
             int tmpgrid[GRIDSIZE][GRIDSIZE];
             memcpy(tmpgrid, grid, sizeof(int[GRIDSIZE][GRIDSIZE]));
@@ -582,7 +597,20 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
                 m.newgrid.x, m.newgrid.y,
                 m.arows.x, m.arows.y, (-1) * currBotColor);
 
-            double tpscore = MinMax(tmpgrid, depth - 1, true, turnID, arfa, beta, next_h);
+            double tpscore;
+            if (firstMove) {
+                // PV走法：全窗口搜索
+                tpscore = MinMax(tmpgrid, depth - 1, true, turnID, arfa, beta, next_h);
+                firstMove = false;
+            }
+            else {
+                // 非PV走法：先零窗口试探
+                tpscore = MinMax(tmpgrid, depth - 1, true, turnID, beta - 0.01, beta, next_h);
+                // fail-low，再全窗口重搜
+                if (tpscore < beta && tpscore > arfa) {
+                    tpscore = MinMax(tmpgrid, depth - 1, true, turnID, arfa, beta, next_h);
+                }
+            }
 
             // 更新最小值
             if (tpscore < currentmin) {

@@ -259,7 +259,6 @@ vector<Move> get_valid_moves(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     return all_valid_moves;
 }
 
-// 中心位置评分：越靠近中心分数越高（凶狠模式：激进中心控制）
 inline int centerScore(const Point& p) {
     // 原先权重（7-距离），现改为平方关系增强中心吸引力
     int dist = abs(p.x - 3) + abs(p.y - 3);
@@ -398,6 +397,36 @@ int enclosureTerritoryScore(int tpgrid[GRIDSIZE][GRIDSIZE],
     }
     return score;
 }
+// 阶段独立策略：返回当前阶段的评估权重参数
+// 返回结构: {t1, t2, p1, p2, m, enc} 对应 {皇后领地, 国王领地, 皇后位置, 国王位置, 机动性, 圈地}
+struct StageWeights {
+    double a, b, c, d, e, f;
+};
+
+StageWeights getStageStrategy(int turnID) {
+    // 策略3：阶段独立逻辑，而非线性插值
+    if (turnID <= 15) {
+        // 超激进开局：全力圈地，中心控制
+        return {0.02, 0.03, 0.03, 0.02, 0.20, 0.70};
+    }
+    else if (turnID <= 25) {
+        // 进一步激进：继续圈地优先，但稍微考虑领地
+        return {0.05, 0.08, 0.05, 0.05, 0.22, 0.55};
+    }
+    else if (turnID <= 40) {
+        // 中局早期：圈地与领地平衡，逐步转向领地控制
+        return {0.20, 0.18, 0.12, 0.12, 0.15, 0.23};
+    }
+    else if (turnID <= 55) {
+        // 中局后期：领地控制为主，圈地和机动性次之
+        return {0.35, 0.30, 0.15, 0.12, 0.08, 0.00};
+    }
+    else {
+        // 残局：纯领地评估，圈地已无意义
+        return {0.80, 0.10, 0.05, 0.05, 0.00, 0.00};
+    }
+}
+
 // 计算玩家机动性得分：总可达格子+最小可达格子
 double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int totalReach = 0;
@@ -456,32 +485,12 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
     double m = getMobilityScore(grid_white, tpgrid) - getMobilityScore(grid_black, tpgrid);
     // 圈地差值（白方圈到的净空格）
     double enc = (double)enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
-    // 按回合分配权重：开局/中局/残局
-    // 凶狠策略：开局激进圈地，中局逐步转向领地，残局稳定收割
-    double a, b, c, d, e, f;
-    if (turnID <= 15) {
-        // 超激进开局：圈地权重0.50，狂扫中心，最小化其他干扰
-        a = 0.08; b = 0.12; c = 0.05; d = 0.05; e = 0.20; f = 0.50;
-    }
-    else if (turnID <= 25) {
-        // 进一步激进：圈地权重0.45，继续坚守中心
-        a = 0.10; b = 0.15; c = 0.08; d = 0.08; e = 0.14; f = 0.45;
-    }
-    else if (turnID <= 40) {
-        // 中局早期：圈地权重0.35，开始考虑其他因素但仍激进
-        a = 0.18; b = 0.20; c = 0.12; d = 0.12; e = 0.12; f = 0.26;
-    }
-    else if (turnID <= 55) {
-        // 中局后期：平衡领地和圈地，权重各占一半
-        a = 0.30; b = 0.25; c = 0.15; d = 0.12; e = 0.08; f = 0.10;
-    }
-    else {
-        // 残局：传统领地评估为主，圈地已不重要
-        a = 0.75; b = 0.10; c = 0.05; d = 0.05; e = 0.00; f = 0.05;
-    }
+
+    // 策略3：使用阶段独立策略获取权重
+    StageWeights weights = getStageStrategy(turnID);
 
     // 加权总分，黑方反转分数
-    double score = a * t1 + b * t2 + c * p1 + d * p2 + e * m + f * enc;
+    double score = weights.a * t1 + weights.b * t2 + weights.c * p1 + weights.d * p2 + weights.e * m + weights.f * enc;
     return (currBotColor == grid_white) ? score : -score;
 }
 
@@ -491,6 +500,48 @@ void get_newgrid(int tmpgrid[GRIDSIZE][GRIDSIZE], Move& move, int color) {
     tmpgrid[start.x][start.y] = 0;
     tmpgrid[newg.x][newg.y] = color;
     tmpgrid[arrow.x][arrow.y] = 2;
+}
+
+// 计算单步走法的圈地收益
+int calculateEnclosureGain(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    int whiteDistQ[GRIDSIZE][GRIDSIZE], blackDistQ[GRIDSIZE][GRIDSIZE];
+
+    // 临时棋盘执行这步走法
+    int tmpgrid[GRIDSIZE][GRIDSIZE];
+    memcpy(tmpgrid, tpgrid, sizeof(int[GRIDSIZE][GRIDSIZE]));
+    get_newgrid(tmpgrid, (Move&)m, color);
+
+    // 计算走法前后的圈地得分变化
+    computeDistances(grid_white, tpgrid, whiteDistQ, 1);
+    computeDistances(grid_black, tpgrid, blackDistQ, 1);
+    int encBefore = enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
+
+    computeDistances(grid_white, tmpgrid, whiteDistQ, 1);
+    computeDistances(grid_black, tmpgrid, blackDistQ, 1);
+    int encAfter = enclosureTerritoryScore(tmpgrid, whiteDistQ, blackDistQ);
+
+    return (color == grid_white) ? (encAfter - encBefore) : (encBefore - encAfter);
+}
+
+// 策略2：开局圈地约束过滤 - 仅保留圈地收益超过阈值的走法
+vector<Move> filterMovesByEnclosure(const vector<Move>& moves, int color, int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
+    // 仅在开局（turnID <= 20）应用约束过滤
+    if (turnID > 20) return moves;
+
+    // 开局圈地收益阈值（可根据局面调整）
+    const int ENCLOSURE_THRESHOLD = 1;
+    vector<Move> filtered;
+
+    for (const auto& m : moves) {
+        int gain = calculateEnclosureGain(m, color, tpgrid);
+        // 只保留圈地收益正的走法
+        if (gain >= ENCLOSURE_THRESHOLD) {
+            filtered.push_back(m);
+        }
+    }
+
+    // 如果过滤后没有走法，返回所有走法
+    return filtered.empty() ? moves : filtered;
 }
 
 // 判断两步走法是否完全相同
@@ -505,8 +556,7 @@ double terminalScore(bool isMaxPlayer) {
     return isMaxPlayer ? -1e8 : 1e8;
 }
 
-// ========================== 最终 MinMax（带历史启发 + TT + αβ）==========================
-// 极大极小值搜索 + αβ剪枝 + 置换表 + 历史启发
+    // 极大极小值搜索 + αβ剪枝 + 置换表 + 历史启发
 double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, double arfa, double beta, unsigned long long h) {
     // 超时终止搜索，返回当前评估值
     if (stop_searching || timeIsUp()) {
@@ -545,6 +595,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
     // 极大层：我方回合
     if (isMax) {
         vector<Move> moves = get_valid_moves(currBotColor, grid);
+        // 策略2应用：开局圈地约束过滤（仅我方回合应用）
+        moves = filterMovesByEnclosure(moves, currBotColor, grid, turnID);
         if (moves.empty()) return terminalScore(true);
         double currentmax = -1e9;
 

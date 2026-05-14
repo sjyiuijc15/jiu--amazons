@@ -259,24 +259,38 @@ vector<Move> get_valid_moves(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     return all_valid_moves;
 }
 
-// 中心位置评分：越靠近中心分数越高
+// 中心位置评分：越靠近中心分数越高（凶狠模式：激进中心控制）
 inline int centerScore(const Point& p) {
-    return 7 - (abs(p.x - 3) + abs(p.y - 3));
+    // 原先权重（7-距离），现改为平方关系增强中心吸引力
+    int dist = abs(p.x - 3) + abs(p.y - 3);
+    // 凶狠计算：中心(3,3)得14分，边缘得0分，形成强梯度
+    return max(0, 14 - dist * 2);
 }
 
 // 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
+// 凶狠模式：优先中心控制和封锁对手
 int quickMoveScore(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int score = 0;
-    score += centerScore(m.newgrid) * 6;
-    score += centerScore(m.arows) * 2;
-    // 移动距离越长分数越高
-    score += max(abs(m.newgrid.x - m.initgrid.x), abs(m.newgrid.y - m.initgrid.y)) * 2;
+    // 激进提高中心权重：6 -> 12
+    score += centerScore(m.newgrid) * 12;
+    // 激进提高箭的中心权重：2 -> 5
+    score += centerScore(m.arows) * 5;
+    // 移动距离越长分数越高，激进提高权重
+    score += max(abs(m.newgrid.x - m.initgrid.x), abs(m.newgrid.y - m.initgrid.y)) * 4;
 
-    // 箭靠近对方皇后加分
+    // 箭靠近对方皇后大幅加分：激进封锁
     int opp = -color;
     for (int d = 0; d < 8; ++d) {
         int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
-        if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 8;
+        if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 20;  // 8 -> 20
+    }
+    // 额外激进措施：在距离对方皇后很近的地方射箭，直接加分
+    for (int d = 0; d < 8; ++d) {
+        for (int dist = 1; dist <= 2; dist++) {
+            int nx = m.arows.x + dx[d] * dist;
+            int ny = m.arows.y + dy[d] * dist;
+            if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 12;
+        }
     }
     return score;
 }
@@ -440,22 +454,30 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
 
     // 机动性差值
     double m = getMobilityScore(grid_white, tpgrid) - getMobilityScore(grid_black, tpgrid);
- // 圈地差值（白方圈到的净空格）
+    // 圈地差值（白方圈到的净空格）
     double enc = (double)enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
     // 按回合分配权重：开局/中局/残局
-    // 策略：开局更加激进地圈地，优先争夺领地
-    double a, b, c, d, e,f;
-    if (turnID <= 20) {
-        // 开局：加强圈地权重到0.35，减少其他权重
-        a = 0.10; b = 0.20; c = 0.10; d = 0.10; e = 0.15; f = 0.35;
+    // 凶狠策略：开局激进圈地，中局逐步转向领地，残局稳定收割
+    double a, b, c, d, e, f;
+    if (turnID <= 15) {
+        // 超激进开局：圈地权重0.50，狂扫中心，最小化其他干扰
+        a = 0.08; b = 0.12; c = 0.05; d = 0.05; e = 0.20; f = 0.50;
     }
-    else if (turnID <= 49) {
-        // 中局：逐步减少圈地权重，但仍然较强
-        a = 0.20; b = 0.22; c = 0.15; d = 0.15; e = 0.10; f = 0.18;
+    else if (turnID <= 25) {
+        // 进一步激进：圈地权重0.45，继续坚守中心
+        a = 0.10; b = 0.15; c = 0.08; d = 0.08; e = 0.14; f = 0.45;
+    }
+    else if (turnID <= 40) {
+        // 中局早期：圈地权重0.35，开始考虑其他因素但仍激进
+        a = 0.18; b = 0.20; c = 0.12; d = 0.12; e = 0.12; f = 0.26;
+    }
+    else if (turnID <= 55) {
+        // 中局后期：平衡领地和圈地，权重各占一半
+        a = 0.30; b = 0.25; c = 0.15; d = 0.12; e = 0.08; f = 0.10;
     }
     else {
-        // 残局：回到传统领地评估为主
-        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00; f = 0.08;
+        // 残局：传统领地评估为主，圈地已不重要
+        a = 0.75; b = 0.10; c = 0.05; d = 0.05; e = 0.00; f = 0.05;
     }
 
     // 加权总分，黑方反转分数

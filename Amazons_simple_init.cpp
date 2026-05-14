@@ -346,7 +346,44 @@ int reachableCountFromQueen(const Point& q, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     }
     return count;
 }
+// 计算“圈地”得分：按空区块判断仅一方“可到达”的领地
+int enclosureTerritoryScore(int tpgrid[GRIDSIZE][GRIDSIZE],
+                            int whiteDistQ[GRIDSIZE][GRIDSIZE],
+                            int blackDistQ[GRIDSIZE][GRIDSIZE]) {
+    bool vis[GRIDSIZE][GRIDSIZE] = {false};
+    int score = 0;
 
+    for (int sx = 0; sx < GRIDSIZE; ++sx) {
+        for (int sy = 0; sy < GRIDSIZE; ++sy) {
+            if (tpgrid[sx][sy] != 0 || vis[sx][sy]) continue;
+
+            queue<Point> q;
+            q.push(Point(sx, sy));
+            vis[sx][sy] = true;
+
+            int area = 0;
+            bool whiteReach = false, blackReach = false;
+            while (!q.empty()) {
+                Point u = q.front(); q.pop();
+                ++area;
+
+                if (whiteDistQ[u.x][u.y] < 100) whiteReach = true;
+                if (blackDistQ[u.x][u.y] < 100) blackReach = true;
+
+                for (int d = 0; d < 8; ++d) {
+                    int nx = u.x + dx[d], ny = u.y + dy[d];
+                    if (!inMap(nx, ny) || tpgrid[nx][ny] != 0 || vis[nx][ny]) continue;
+                    vis[nx][ny] = true;
+                    q.push(Point(nx, ny));
+                }
+            }
+
+            if (whiteReach && !blackReach) score += area;
+            else if (blackReach && !whiteReach) score -= area;
+        }
+    }
+    return score;
+}
 // 计算玩家机动性得分：总可达格子+最小可达格子
 double getMobilityScore(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int totalReach = 0;
@@ -403,21 +440,22 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
 
     // 机动性差值
     double m = getMobilityScore(grid_white, tpgrid) - getMobilityScore(grid_black, tpgrid);
-
+ // 圈地差值（白方圈到的净空格）
+    double enc = (double)enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
     // 按回合分配权重：开局/中局/残局
-    double a, b, c, d, e;
+    double a, b, c, d, e,f;
     if (turnID <= 20) {
-        a = 0.14; b = 0.37; c = 0.13; d = 0.13; e = 0.20;
+        a = 0.14; b = 0.33; c = 0.13; d = 0.17; e = 0.17,f=0.10;
     }
     else if (turnID <= 49) {
-        a = 0.25; b = 0.30; c = 0.20; d = 0.20; e = 0.05;
+        a = 0.24; b = 0.28; c = 0.18; d = 0.18; e = 0.04,f=0.08 ;
     }
     else {
-        a = 0.80; b = 0.10; c = 0.05; d = 0.05; e = 0.00;
+        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00,f=0.08;
     }
 
     // 加权总分，黑方反转分数
-    double score = a * t1 + b * t2 + c * p1 + d * p2 + e * m;
+    double score = a * t1 + b * t2 + c * p1 + d * p2 + e * m + f * enc;
     return (currBotColor == grid_white) ? score : -score;
 }
 

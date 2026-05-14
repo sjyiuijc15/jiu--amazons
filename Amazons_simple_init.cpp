@@ -443,15 +443,19 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
  // 圈地差值（白方圈到的净空格）
     double enc = (double)enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
     // 按回合分配权重：开局/中局/残局
+    // 策略：开局更加激进地圈地，优先争夺领地
     double a, b, c, d, e,f;
     if (turnID <= 20) {
-        a = 0.14; b = 0.33; c = 0.13; d = 0.17; e = 0.17,f=0.10;
+        // 开局：加强圈地权重到0.35，减少其他权重
+        a = 0.10; b = 0.20; c = 0.10; d = 0.10; e = 0.15; f = 0.35;
     }
     else if (turnID <= 49) {
-        a = 0.24; b = 0.28; c = 0.18; d = 0.18; e = 0.04,f=0.08 ;
+        // 中局：逐步减少圈地权重，但仍然较强
+        a = 0.20; b = 0.22; c = 0.15; d = 0.15; e = 0.10; f = 0.18;
     }
     else {
-        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00,f=0.08;
+        // 残局：回到传统领地评估为主
+        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00; f = 0.08;
     }
 
     // 加权总分，黑方反转分数

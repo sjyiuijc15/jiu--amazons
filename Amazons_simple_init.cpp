@@ -359,6 +359,19 @@ int reachableCountFromQueen(const Point& q, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     }
     return count;
 }
+
+// 计算某颜色在当前局面的总机动步数（快速版）
+int totalReachableForColor(int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    int total = 0;
+    for (int x = 0; x < GRIDSIZE; ++x) {
+        for (int y = 0; y < GRIDSIZE; ++y) {
+            if (tpgrid[x][y] == color) {
+                total += reachableCountFromQueen(Point(x, y), tpgrid);
+            }
+        }
+    }
+    return total;
+}
 // 计算“圈地”得分：按空区块判断仅一方“可到达”的领地
 int enclosureTerritoryScore(int tpgrid[GRIDSIZE][GRIDSIZE],
                             int whiteDistQ[GRIDSIZE][GRIDSIZE],
@@ -544,6 +557,52 @@ vector<Move> filterMovesByEnclosure(const vector<Move>& moves, int color, int tp
     return filtered.empty() ? moves : filtered;
 }
 
+// 开局强制前置策略：优先“扩张+压制”兼顾的走法，避免仅靠参数微调
+vector<Move> openingExpansionFilter(const vector<Move>& moves, int color, int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
+    // 只在最关键开局阶段使用，确保前几步快速抢地
+    if (turnID > 10 || moves.size() <= 24) return moves;
+
+    struct ScoredMove {
+        int score;
+        Move move;
+    };
+    vector<ScoredMove> scored;
+    scored.reserve(moves.size());
+
+    int opp = -color;
+    int oppMobBefore = totalReachableForColor(opp, tpgrid);
+
+    for (const auto& m : moves) {
+        int tmpgrid[GRIDSIZE][GRIDSIZE];
+        memcpy(tmpgrid, tpgrid, sizeof(int[GRIDSIZE][GRIDSIZE]));
+        get_newgrid(tmpgrid, (Move&)m, color);
+
+        // 扩张收益：自身机动性 + 圈地增量
+        int selfMob = totalReachableForColor(color, tmpgrid);
+        int encGain = calculateEnclosureGain(m, color, tpgrid);
+        // 压制收益：对手机动性下降
+        int oppMobAfter = totalReachableForColor(opp, tmpgrid);
+        int oppCut = oppMobBefore - oppMobAfter;
+
+        // 组合打分：强调前几步直接拉开可用空间差距
+        int score = selfMob + oppCut * 3 + encGain * 30 + centerScore(m.newgrid) * 8;
+        scored.push_back({score, m});
+    }
+
+    stable_sort(scored.begin(), scored.end(), [](const ScoredMove& a, const ScoredMove& b) {
+        return a.score > b.score;
+    });
+
+    // 仅保留头部候选，显著提升开局“抢地”决策密度和搜索深度
+    int keep = max(18, (int)scored.size() / 5);
+    keep = min(keep, (int)scored.size());
+
+    vector<Move> filtered;
+    filtered.reserve(keep);
+    for (int i = 0; i < keep; ++i) filtered.push_back(scored[i].move);
+    return filtered;
+}
+
 // 判断两步走法是否完全相同
 bool isSameMove(const Move& m1, const Move& m2) {
     return m1.initgrid.x == m2.initgrid.x && m1.initgrid.y == m2.initgrid.y &&
@@ -597,6 +656,8 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
         vector<Move> moves = get_valid_moves(currBotColor, grid);
         // 策略2应用：开局圈地约束过滤（仅我方回合应用）
         moves = filterMovesByEnclosure(moves, currBotColor, grid, turnID);
+        // 开局阶段额外执行扩张过滤：前几步快速占大块空间
+        moves = openingExpansionFilter(moves, currBotColor, grid, turnID);
         if (moves.empty()) return terminalScore(true);
         double currentmax = -1e9;
 

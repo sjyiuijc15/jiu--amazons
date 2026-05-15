@@ -9,6 +9,7 @@
 #include<cmath>
 #include <map>
 #include<cstring>
+#include <unordered_map>
 
 // 棋盘尺寸定义 8x8
 #define GRIDSIZE 8
@@ -49,6 +50,7 @@ const int MAX_DEPTH = 1000;
 
 using namespace std;
 
+
 // 当前AI执子颜色（1黑，-1白）
 int currBotColor;
 // 棋盘状态数组：x横坐标，y纵坐标
@@ -74,6 +76,37 @@ struct Move {
     Move(Point init, Point newgrid, Point arows) : initgrid(init), newgrid(newgrid), arows(arows) {}
     Move() {}
 };
+
+// ------------------------- Q-Learning（轻量在线版） -------------------------
+// 状态-动作Q表：key = "stateHash|moveCode"
+unordered_map<string, double> qTable;
+const double Q_ALPHA = 0.25;   // 学习率
+const double Q_GAMMA = 0.90;   // 折扣因子
+const double Q_LAMBDA = 0.12;  // Q值融入搜索分数的权重
+const double Q_EPSILON = 0.05; // ε-greedy探索概率
+
+inline string encodeMove(const Move& m) {
+    return to_string(m.initgrid.x) + "," + to_string(m.initgrid.y) + "->" +
+           to_string(m.newgrid.x) + "," + to_string(m.newgrid.y) + "|" +
+           to_string(m.arows.x) + "," + to_string(m.arows.y);
+}
+
+inline string stateActionKey(unsigned long long stateHash, const Move& m) {
+    return to_string(stateHash) + "|" + encodeMove(m);
+}
+
+double getQValue(unsigned long long stateHash, const Move& m) {
+    auto key = stateActionKey(stateHash, m);
+    auto it = qTable.find(key);
+    return (it == qTable.end()) ? 0.0 : it->second;
+}
+
+void updateQValue(unsigned long long stateHash, const Move& m, double reward, double nextBestQ) {
+    string key = stateActionKey(stateHash, m);
+    double oldQ = getQValue(stateHash, m);
+    double target = reward + Q_GAMMA * nextBestQ;
+    qTable[key] = oldQ + Q_ALPHA * (target - oldQ);
+}
 
 // 置换表条目结构体：存储搜索过的局面信息
 struct TTEntry {
@@ -827,6 +860,48 @@ int main() {
         }
     }
     if (!legalBest) overallBestMove = rootMoves[0];
+
+    // ------------------------- Q-Learning根节点更新与选着 -------------------------
+    // 使用搜索得分作为即时回报，对当前状态下最佳动作做一次TD更新
+    if (!rootMoves.empty()) {
+        int nextGrid[GRIDSIZE][GRIDSIZE];
+        memcpy(nextGrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
+        get_newgrid(nextGrid, overallBestMove, currBotColor);
+        double nextBestQ = 0.0;
+        vector<Move> nextMoves = get_valid_moves(-currBotColor, nextGrid);
+        for (const auto& nm : nextMoves) {
+            // 这里用“对手视角”的动作Q近似下一步价值，取最大作bootstrap
+            nextBestQ = max(nextBestQ, getQValue(updateHash(currentHash,
+                overallBestMove.initgrid.x, overallBestMove.initgrid.y,
+                overallBestMove.newgrid.x, overallBestMove.newgrid.y,
+                overallBestMove.arows.x, overallBestMove.arows.y, currBotColor), nm));
+        }
+        updateQValue(currentHash, overallBestMove, last_score, nextBestQ);
+
+        // ε-greedy：大多数时间选 search+Q 最优，少量时间随机探索
+        std::mt19937 rng((unsigned)time(nullptr));
+        std::uniform_real_distribution<double> uni01(0.0, 1.0);
+        if (uni01(rng) < Q_EPSILON) {
+            std::uniform_int_distribution<int> pick(0, (int)rootMoves.size() - 1);
+            overallBestMove = rootMoves[pick(rng)];
+        } else {
+            double bestBlend = -1e18;
+            Move blendedBest = overallBestMove;
+            for (const auto& rm : rootMoves) {
+                int tmpgrid[GRIDSIZE][GRIDSIZE];
+                memcpy(tmpgrid, gridInfo, sizeof(int[GRIDSIZE][GRIDSIZE]));
+                Move candidate = rm;
+                get_newgrid(tmpgrid, candidate, currBotColor);
+                double evalScore = evaluate(tmpgrid, turnID);
+                double blend = evalScore + Q_LAMBDA * getQValue(currentHash, rm);
+                if (blend > bestBlend) {
+                    bestBlend = blend;
+                    blendedBest = rm;
+                }
+            }
+            overallBestMove = blendedBest;
+        }
+    }
 
     // 解析最终走法坐标
     int startX = overallBestMove.initgrid.x;

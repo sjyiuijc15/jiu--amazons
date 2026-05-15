@@ -700,6 +700,77 @@ double MTDF(unsigned long long h, double f, int depth, int turnID) {
     return g;
 }
 
+// 开局矩形圈地启发：前几回合优先执行固定套路
+bool tryOpeningRectanglePlan(int turnID, int botColor, const vector<Move>& rootMoves, Move& chosenMove) {
+    if (rootMoves.empty()) return false;
+    // 仅在开局阶段启用，避免中后盘僵化
+    if (turnID > 5) return false;
+
+    // 目标矩形：尽量在中盘前形成一个大框
+    const int lx = 1, rx = 6, ly = 1, ry = 6;
+    // “看家子”锚点：黑方偏左下角，白方偏左上角
+    const Point guardAnchor = (botColor == grid_black) ? Point{ 1, 1 } : Point{ 1, 6 };
+
+    auto dist2 = [](int x1, int y1, int x2, int y2) {
+        int dx = x1 - x2, dy = y1 - y2;
+        return dx * dx + dy * dy;
+        };
+    auto onRectEdge = [&](int x, int y) {
+        bool inBox = (x >= lx && x <= rx && y >= ly && y <= ry);
+        if (!inBox) return false;
+        return x == lx || x == rx || y == ly || y == ry;
+        };
+
+    double bestScore = -1e18;
+    Move best = rootMoves[0];
+    double bestQuick = -1e18;
+
+    for (const auto& m : rootMoves) {
+        // 选一个最接近锚点的棋子作为“看家子”
+        bool isGuardPiece = dist2(m.initgrid.x, m.initgrid.y, guardAnchor.x, guardAnchor.y) <= 2;
+
+        double score = 0.0;
+        // 走子：优先向矩形边靠拢
+        if (onRectEdge(m.newgrid.x, m.newgrid.y)) score += 120.0;
+        int dEdge = min(min(abs(m.newgrid.x - lx), abs(m.newgrid.x - rx)),
+            min(abs(m.newgrid.y - ly), abs(m.newgrid.y - ry)));
+        score -= dEdge * 18.0;
+
+        // 箭：尽可能打在矩形边上，作为“边界墙”
+        if (onRectEdge(m.arows.x, m.arows.y)) score += 160.0;
+        int dArrowEdge = min(min(abs(m.arows.x - lx), abs(m.arows.x - rx)),
+            min(abs(m.arows.y - ly), abs(m.arows.y - ry)));
+        score -= dArrowEdge * 12.0;
+
+        // 看家子：更靠近锚点，守住一角；其他子鼓励向中前场展开
+        if (isGuardPiece) {
+            score -= dist2(m.newgrid.x, m.newgrid.y, guardAnchor.x, guardAnchor.y) * 4.0;
+            if (onRectEdge(m.newgrid.x, m.newgrid.y)) score += 30.0;
+        }
+        else {
+            int centerDist = dist2(m.newgrid.x, m.newgrid.y, 3, 3);
+            score -= centerDist * 0.8;
+        }
+
+        // 兜底：兼顾已有快速评分，避免完全脱离局面合法性质量
+        double qs = quickMoveScore(m, botColor, gridInfo);
+        if (qs > bestQuick) bestQuick = qs;
+        score += qs * 0.25;
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = m;
+        }
+    }
+
+    // 保护条件：若“套路走法”在基础快速评分上明显太差，则放弃套路
+    double chosenQuick = quickMoveScore(best, botColor, gridInfo);
+    if (chosenQuick + 120.0 < bestQuick) return false;
+
+    chosenMove = best;
+    return true;
+}
+
 int main() {
     int x0, y0, x1, y1, x2, y2;
 
@@ -747,11 +818,23 @@ int main() {
         }
     }
 
+    vector<Move> rootMoves = get_valid_moves(currBotColor, gridInfo);
+    Move overallBestMove = rootMoves.empty() ? Move() : rootMoves[0];
+    if (rootMoves.empty()) {
+        cout << -1 << ' ' << -1 << ' ' << -1 << ' ' << -1 << ' ' << -1 << ' ' << -1 << endl;
+        return 0;
+    }
+
+    // 开局固定矩形圈地策略（命中仅作为根节点优先候选，不直接短路）
+    Move openingMove;
+    bool hasOpeningHint = tryOpeningRectanglePlan(turnID, currBotColor, rootMoves, openingMove);
+    if (hasOpeningHint) {
+        overallBestMove = openingMove;
+    }
+
     // 启动计时器，初始化搜索
     startTimer();
     stop_searching = false;
-    vector<Move> rootMoves = get_valid_moves(currBotColor, gridInfo);
-    Move overallBestMove = rootMoves.empty() ? Move() : rootMoves[0];
     double last_score = 0;
 
     // 迭代加深搜索：1层到最大层

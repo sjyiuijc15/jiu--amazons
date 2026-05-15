@@ -266,10 +266,11 @@ inline int centerScore(const Point& p) {
 
 // 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
 int openingFormationBonus(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GRIDSIZE]) {
-    if (turnID > 10) return 0;
+    if (turnID > 12) return 0;
 
     int bonus = 0;
-    Point targets[4] = {Point(2,2), Point(2,5), Point(5,2), Point(5,5)};
+    // 更大胆的开局阵型：拉大四个锚点间距，优先争取更大块地
+    Point targets[4] = {Point(1,1), Point(1,6), Point(6,1), Point(6,6)};
 
     int bestBefore = 100, bestAfter = 100;
     for (int i = 0; i < 4; ++i) {
@@ -278,10 +279,10 @@ int openingFormationBonus(const Move& m, int color, int turnID, int tpgrid[GRIDS
         bestBefore = min(bestBefore, db);
         bestAfter = min(bestAfter, da);
     }
-    bonus += (bestBefore - bestAfter) * 12;
+    bonus += (bestBefore - bestAfter) * 16;
 
     int centerDist = abs(m.newgrid.x - 3) + abs(m.newgrid.y - 3);
-    if (centerDist <= 3) bonus += 8;
+    if (centerDist <= 3) bonus += 6;
 
     int forward = (color == grid_white) ? -1 : 1;
     if ((m.newgrid.y - m.initgrid.y) * forward > 0) bonus += 6;

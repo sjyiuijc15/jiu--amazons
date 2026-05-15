@@ -45,7 +45,7 @@ int historyFrom[2][GRIDSIZE][GRIDSIZE] = {0};
 int historyTo[2][GRIDSIZE][GRIDSIZE] = {0};
 
 // 迭代加深最大搜索深度
-const int MAX_DEPTH = 1000;
+const int MAX_DEPTH = 10000000;
 
 using namespace std;
 
@@ -265,40 +265,7 @@ inline int centerScore(const Point& p) {
 }
 
 // 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
-int openingFormationBonus(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GRIDSIZE]) {
-    if (turnID > 12) return 0;
-
-    int bonus = 0;
-    // 更大胆的开局阵型：拉大四个锚点间距，优先争取更大块地
-    Point targets[4] = {Point(1,1), Point(1,6), Point(6,1), Point(6,6)};
-
-    int bestBefore = 100, bestAfter = 100;
-    for (int i = 0; i < 4; ++i) {
-        int db = abs(m.initgrid.x - targets[i].x) + abs(m.initgrid.y - targets[i].y);
-        int da = abs(m.newgrid.x - targets[i].x) + abs(m.newgrid.y - targets[i].y);
-        bestBefore = min(bestBefore, db);
-        bestAfter = min(bestAfter, da);
-    }
-    bonus += (bestBefore - bestAfter) * 16;
-
-    int centerDist = abs(m.newgrid.x - 3) + abs(m.newgrid.y - 3);
-    if (centerDist <= 3) bonus += 6;
-
-    int forward = (color == grid_white) ? -1 : 1;
-    if ((m.newgrid.y - m.initgrid.y) * forward > 0) bonus += 6;
-
-    int arrowDistCenter = abs(m.arows.x - 3) + abs(m.arows.y - 3);
-    if (arrowDistCenter <= 3) bonus += 4;
-
-    for (int d = 0; d < 8; ++d) {
-        int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
-        if (inMap(nx, ny) && tpgrid[nx][ny] == color) bonus += 2;
-    }
-    return bonus;
-}
-
-// 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
-int quickMoveScore(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+int quickMoveScore(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int score = 0;
     score += centerScore(m.newgrid) * 6;
     score += centerScore(m.arows) * 2;
@@ -311,7 +278,6 @@ int quickMoveScore(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GR
         int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
         if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 8;
     }
-    score += openingFormationBonus(m, color, turnID, tpgrid);
     return score;
 }
 
@@ -477,19 +443,15 @@ double evaluate(int tpgrid[GRIDSIZE][GRIDSIZE], int turnID) {
  // 圈地差值（白方圈到的净空格）
     double enc = (double)enclosureTerritoryScore(tpgrid, whiteDistQ, blackDistQ);
     // 按回合分配权重：开局/中局/残局
-    // 策略：开局更加激进地圈地，优先争夺领地
     double a, b, c, d, e,f;
     if (turnID <= 20) {
-        // 开局：加强圈地权重到0.35，减少其他权重
-        a = 0.10; b = 0.20; c = 0.10; d = 0.10; e = 0.15; f = 0.35;
+        a = 0.14; b = 0.33; c = 0.13; d = 0.17; e = 0.17,f=0.10;
     }
     else if (turnID <= 49) {
-        // 中局：逐步减少圈地权重，但仍然较强
-        a = 0.20; b = 0.22; c = 0.15; d = 0.15; e = 0.10; f = 0.18;
+        a = 0.24; b = 0.28; c = 0.18; d = 0.18; e = 0.04,f=0.08 ;
     }
     else {
-        // 残局：回到传统领地评估为主
-        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00; f = 0.08;
+        a = 0.72; b = 0.10; c = 0.05; d = 0.05; e = 0.00,f=0.08;
     }
 
     // 加权总分，黑方反转分数
@@ -566,7 +528,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
             int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
-            return quickMoveScore(a, currBotColor, turnID, grid) > quickMoveScore(b, currBotColor, turnID, grid);
+            return quickMoveScore(a, currBotColor, grid) > quickMoveScore(b, currBotColor, grid);
         });
 
         // 置换表最优走法置顶
@@ -649,7 +611,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
             int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
-            return quickMoveScore(a, oppColor, turnID, grid) > quickMoveScore(b, oppColor, turnID, grid);
+            return quickMoveScore(a, oppColor, grid) > quickMoveScore(b, oppColor, grid);
         });
 
         // 置换表最优走法置顶

@@ -265,7 +265,39 @@ inline int centerScore(const Point& p) {
 }
 
 // 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
-int quickMoveScore(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+int openingFormationBonus(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GRIDSIZE]) {
+    if (turnID > 10) return 0;
+
+    int bonus = 0;
+    Point targets[4] = {Point(2,2), Point(2,5), Point(5,2), Point(5,5)};
+
+    int bestBefore = 100, bestAfter = 100;
+    for (int i = 0; i < 4; ++i) {
+        int db = abs(m.initgrid.x - targets[i].x) + abs(m.initgrid.y - targets[i].y);
+        int da = abs(m.newgrid.x - targets[i].x) + abs(m.newgrid.y - targets[i].y);
+        bestBefore = min(bestBefore, db);
+        bestAfter = min(bestAfter, da);
+    }
+    bonus += (bestBefore - bestAfter) * 12;
+
+    int centerDist = abs(m.newgrid.x - 3) + abs(m.newgrid.y - 3);
+    if (centerDist <= 3) bonus += 8;
+
+    int forward = (color == grid_white) ? -1 : 1;
+    if ((m.newgrid.y - m.initgrid.y) * forward > 0) bonus += 6;
+
+    int arrowDistCenter = abs(m.arows.x - 3) + abs(m.arows.y - 3);
+    if (arrowDistCenter <= 3) bonus += 4;
+
+    for (int d = 0; d < 8; ++d) {
+        int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
+        if (inMap(nx, ny) && tpgrid[nx][ny] == color) bonus += 2;
+    }
+    return bonus;
+}
+
+// 快速走法评分：用于走法排序，中心、位移、封锁对手权重更高
+int quickMoveScore(const Move& m, int color, int turnID, int tpgrid[GRIDSIZE][GRIDSIZE]) {
     int score = 0;
     score += centerScore(m.newgrid) * 6;
     score += centerScore(m.arows) * 2;
@@ -278,6 +310,7 @@ int quickMoveScore(const Move& m, int color, int tpgrid[GRIDSIZE][GRIDSIZE]) {
         int nx = m.arows.x + dx[d], ny = m.arows.y + dy[d];
         if (inMap(nx, ny) && tpgrid[nx][ny] == opp) score += 8;
     }
+    score += openingFormationBonus(m, color, turnID, tpgrid);
     return score;
 }
 
@@ -532,7 +565,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
             int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
-            return quickMoveScore(a, currBotColor, grid) > quickMoveScore(b, currBotColor, grid);
+            return quickMoveScore(a, currBotColor, turnID, grid) > quickMoveScore(b, currBotColor, turnID, grid);
         });
 
         // 置换表最优走法置顶
@@ -615,7 +648,7 @@ double MinMax(int grid[GRIDSIZE][GRIDSIZE], int depth, bool isMax, int turnID, d
             int ha = historyFrom[cidx][a.initgrid.x][a.initgrid.y] + historyTo[cidx][a.newgrid.x][a.newgrid.y];
             int hb = historyFrom[cidx][b.initgrid.x][b.initgrid.y] + historyTo[cidx][b.newgrid.x][b.newgrid.y];
             if (ha != hb) return ha > hb;
-            return quickMoveScore(a, oppColor, grid) > quickMoveScore(b, oppColor, grid);
+            return quickMoveScore(a, oppColor, turnID, grid) > quickMoveScore(b, oppColor, turnID, grid);
         });
 
         // 置换表最优走法置顶
